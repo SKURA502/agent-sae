@@ -1,0 +1,89 @@
+# Task and Dataset Configuration
+
+# 当前使用的数据集
+current_dataset: "when2call"
+
+# 数据集配置
+datasets:
+  when2call:
+    name: "When2Call"
+    description: "评估何时该/不该调用工具的数据集"
+    path: "./data/raw/when2call"
+    # 数据格式
+    format: "jsonl"
+    # 字段映射
+    field_mapping:
+      instruction: "instruction"
+      context: "context"
+      tool_schema: "tools"
+      label: "should_call"
+    # 采样数量（-1 表示全部）
+    num_samples: -1
+    
+  bfcl:
+    name: "Berkeley Function Calling Leaderboard"
+    description: "函数调用基准（格式/选择验证）"
+    path: "./data/raw/bfcl"
+    format: "json"
+    field_mapping:
+      instruction: "user_query"
+      context: "context"
+      tool_schema: "functions"
+      label: "ground_truth"
+    num_samples: -1
+    
+  apibank:
+    name: "API-Bank"
+    description: "端到端工具执行验证"
+    path: "./data/raw/apibank"
+    format: "json"
+    field_mapping:
+      instruction: "query"
+      context: "dialogue_history"
+      tool_schema: "api_list"
+      label: "api_call"
+    num_samples: -1
+
+# 沙盒工具配置
+sandbox_tools:
+  # 可用工具列表
+  available_tools:
+    - search
+    - calculator
+    - lookup
+    - route
+  
+  # 噪声注入配置（用于 robustness 实验）
+  noise:
+    # 失败概率
+    p_fail: 0.0
+    # 空结果概率
+    p_empty: 0.0
+    # 错误结果概率
+    p_corrupt: 0.0
+
+# Rollout 生成配置
+rollout:
+  # 每个任务的最大步数
+  max_steps: 10
+  # 生成的 episode 数量
+  num_episodes: 50000
+  # 输出路径
+  output_dir: "./data/rollouts"
+  # 日志格式
+  log_format: "jsonl"
+  # 是否缓存激活
+  cache_activations: true
+  # 激活缓存路径
+  activation_cache_dir: "./data/activations"
+
+# 评测配置
+evaluation:
+  # 评测指标
+  metrics:
+    - tool_call_accuracy
+    - tool_call_rate
+    - task_success_rate
+    - step_count
+  # 评测集大小
+  eval_size: 1000

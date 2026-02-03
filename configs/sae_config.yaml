@@ -1,0 +1,67 @@
+# SAE (Sparse Autoencoder) Configuration
+
+# SAE 架构配置
+architecture:
+  # SAE 类型：topk, vanilla, gated
+  sae_type: "topk"
+  # 字典大小 = hidden_size * expansion_factor
+  expansion_factor: 8
+  # TopK SAE 的 K 值（激活的 latent 数量）
+  # 推荐：hidden_size / 32
+  topk_k: 128
+  # 是否使用 bias
+  use_encoder_bias: true
+  use_decoder_bias: true
+  # decoder 是否归一化
+  normalize_decoder: true
+
+# 训练配置
+training:
+  # 学习率
+  learning_rate: 1.0e-4
+  # 权重衰减
+  weight_decay: 0.0
+  # batch size
+  batch_size: 4096
+  # 训练轮数
+  num_epochs: 10
+  # 梯度累积步数
+  gradient_accumulation_steps: 1
+  # warmup 步数比例
+  warmup_ratio: 0.1
+  # 日志间隔
+  log_interval: 100
+  # 保存间隔
+  save_interval: 1000
+  # 早停耐心
+  early_stopping_patience: 3
+
+# 数据配置
+data:
+  # 样本平衡：CALL vs NO_CALL
+  balance_ratio: 1.0
+  # 只使用 action boundary window
+  use_action_boundary_only: true
+  # W_pre 窗口大小（tool_call 输出前的 token 数）
+  w_pre_window: 20
+  # W_post 窗口大小
+  w_post_window: 10
+  # 验证集比例
+  val_ratio: 0.1
+  # 随机种子
+  seed: 42
+
+# 输出配置
+output:
+  checkpoint_dir: "./outputs/sae_checkpoints"
+  log_dir: "./outputs/logs"
+  # wandb 配置
+  use_wandb: true
+  wandb_project: "agent-sae-tooluse"
+  wandb_entity: null
+
+# 层配置（会被 model_config 覆盖）
+layers:
+  # 训练 SAE 的层（相对位置）
+  # 3/4 位置和 5/6 位置
+  relative_positions: [0.75, 0.83]

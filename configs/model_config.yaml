@@ -1,0 +1,69 @@
+# Model Configuration
+# 支持的模型：Llama-3-8B, Qwen-3-8B/14B, Gemma-3-4B/12B
+
+# 当前使用的模型
+current_model: "llama3-8b"
+
+# 模型配置
+models:
+  llama3-8b:
+    name: "meta-llama/Llama-3-8B-Instruct"
+    local_path: "./models/llama3-8b"
+    hidden_size: 4096
+    num_layers: 32
+    # Hook 层位置（3/4 和 5/6 位置）
+    hook_layers: [24, 27]
+    # 残差流 hook 点名称
+    hook_point: "model.layers.{layer}.post_attention_layernorm"
+    # 是否为 tool-tuned 模型
+    is_tool_tuned: true
+    
+  qwen3-8b:
+    name: "Qwen/Qwen3-8B"
+    local_path: "./models/qwen3-8b"
+    hidden_size: 4096
+    num_layers: 32
+    hook_layers: [24, 27]
+    hook_point: "model.layers.{layer}.post_attention_layernorm"
+    is_tool_tuned: true
+    
+  qwen3-14b:
+    name: "Qwen/Qwen3-14B"
+    local_path: "./models/qwen3-14b"
+    hidden_size: 5120
+    num_layers: 40
+    hook_layers: [30, 34]
+    hook_point: "model.layers.{layer}.post_attention_layernorm"
+    is_tool_tuned: true
+    
+  gemma3-4b:
+    name: "google/gemma-3-4b-it"
+    local_path: "./models/gemma3-4b"
+    hidden_size: 3072
+    num_layers: 26
+    hook_layers: [20, 22]
+    hook_point: "model.layers.{layer}.post_attention_layernorm"
+    is_tool_tuned: true
+    
+  gemma3-12b:
+    name: "google/gemma-3-12b-it"
+    local_path: "./models/gemma3-12b"
+    hidden_size: 4096
+    num_layers: 36
+    hook_layers: [27, 30]
+    hook_point: "model.layers.{layer}.post_attention_layernorm"
+    is_tool_tuned: true
+
+# 推理配置
+inference:
+  max_new_tokens: 512
+  temperature: 0.0
+  top_p: 1.0
+  do_sample: false
+  # 使用 vLLM 加速（Linux 服务器推荐开启）
+  use_vllm: false
+  # 批量大小
+  batch_size: 8
+  # 设备配置
+  device: "cuda"
+  dtype: "bfloat16"

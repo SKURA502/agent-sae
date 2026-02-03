@@ -1,0 +1,41 @@
+# Core Deep Learning
+torch>=2.1.0
+transformers>=4.40.0
+accelerate>=0.27.0
+safetensors>=0.4.0
+
+# vLLM for fast inference (Linux only)
+# vllm>=0.4.0
+
+# Data Processing
+datasets>=2.18.0
+pandas>=2.0.0
+numpy>=1.24.0
+pydantic>=2.0.0
+
+# SAE Training
+# dictionary_learning  # Install from source if needed
+einops>=0.7.0
+wandb>=0.16.0
+
+# Analysis & Visualization
+scikit-learn>=1.4.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+plotly>=5.18.0
+
+# Utilities
+tqdm>=4.66.0
+pyyaml>=6.0.0
+omegaconf>=2.3.0
+jsonlines>=4.0.0
+huggingface_hub>=0.21.0
+
+# Jupyter (optional)
+jupyter>=1.0.0
+ipywidgets>=8.0.0
+
+# Development
+pytest>=8.0.0
+black>=24.0.0
+isort>=5.13.0
