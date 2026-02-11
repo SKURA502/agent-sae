@@ -267,26 +267,26 @@ class OutputParser:
     @staticmethod
     def format_expected_output() -> str:
         """返回期望的输出格式说明（用于 prompt）"""
-        return """请以以下 JSON 格式回复：
+        return """Please respond in the following JSON format:
 
-如果需要调用工具：
+If you need to call a tool:
 ```json
 {
     "decision": "call",
     "tool_call": {
-        "name": "工具名称",
+        "name": "tool_name",
         "arguments": {
-            "参数名": "参数值"
+            "param_name": "param_value"
         }
     }
 }
 ```
 
-如果可以直接回答：
+If you can answer directly:
 ```json
 {
     "decision": "no_call",
-    "response": "你的回答"
+    "response": "your answer"
 }
 ```
 """

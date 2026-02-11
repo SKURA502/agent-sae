@@ -1,7 +1,7 @@
 """
-Tool Utilities - 工具执行器和噪声注入
+Tool Utilities - Tool Executor and Noise Injection
 
-提供统一的工具执行接口和噪声配置。
+Provides unified tool execution interface and noise configuration.
 """
 
 import random
@@ -14,53 +14,53 @@ from ..tool_schema import ToolCall, ToolResult, ToolSchema
 
 @dataclass
 class NoiseConfig:
-    """噪声注入配置"""
-    p_fail: float = 0.0      # 工具执行失败概率
-    p_empty: float = 0.0     # 返回空结果概率
-    p_corrupt: float = 0.0   # 返回错误结果概率
+    """Noise injection configuration"""
+    p_fail: float = 0.0      # Tool execution failure probability
+    p_empty: float = 0.0     # Return empty result probability
+    p_corrupt: float = 0.0   # Return corrupt result probability
     seed: Optional[int] = None
     
     def __post_init__(self):
         if self.seed is not None:
             random.seed(self.seed)
         
-        # 确保概率和不超过1
+        # Ensure probability sum does not exceed 1
         total = self.p_fail + self.p_empty + self.p_corrupt
         if total > 1.0:
-            raise ValueError(f"噪声概率之和不能超过1.0, 当前为: {total}")
+            raise ValueError(f"Sum of noise probabilities cannot exceed 1.0, current: {total}")
 
 
 class BaseTool(ABC):
-    """工具基类"""
+    """Base Tool Class"""
     
     name: str
     schema: ToolSchema
     
     @abstractmethod
     def execute(self, arguments: Dict[str, Any]) -> Any:
-        """执行工具
+        """Execute tool
         
         Args:
-            arguments: 工具参数
+            arguments: Tool parameters
             
         Returns:
-            执行结果
+            Execution result
         """
         pass
     
     @abstractmethod
     def generate_corrupt_result(self, arguments: Dict[str, Any]) -> Any:
-        """生成错误结果（用于噪声注入）"""
+        """Generate corrupt result (for noise injection)"""
         pass
     
     @abstractmethod
     def generate_empty_result(self) -> Any:
-        """生成空结果"""
+        """Generate empty result"""
         pass
 
 
 class ToolExecutor:
-    """工具执行器 - 统一管理工具执行和噪声注入"""
+    """Tool Executor - Unified management of tool execution and noise injection"""
     
     def __init__(
         self,
@@ -69,8 +69,8 @@ class ToolExecutor:
     ):
         """
         Args:
-            tools: 可用工具列表
-            noise_config: 噪声配置
+            tools: List of available tools
+            noise_config: Noise configuration
         """
         self.tools: Dict[str, BaseTool] = {}
         self.noise_config = noise_config or NoiseConfig()
@@ -81,49 +81,49 @@ class ToolExecutor:
                 self.register_tool(tool)
     
     def register_tool(self, tool: BaseTool):
-        """注册工具"""
+        """Register tool"""
         self.tools[tool.name] = tool
     
     def get_available_tools(self) -> List[str]:
-        """获取可用工具名称列表"""
+        """Get list of available tool names"""
         return list(self.tools.keys())
     
     def get_tool_schemas(self) -> List[ToolSchema]:
-        """获取所有工具的 Schema"""
+        """Get all tool schemas"""
         return [tool.schema for tool in self.tools.values()]
     
     def execute(self, tool_call: ToolCall) -> ToolResult:
-        """执行工具调用
+        """Execute tool call
         
         Args:
-            tool_call: 工具调用请求
+            tool_call: Tool call request
             
         Returns:
-            工具执行结果
+            Tool execution result
         """
         tool_name = tool_call.name
         arguments = tool_call.arguments
         
-        # 检查工具是否存在
+        # Check if tool exists
         if tool_name not in self.tools:
             result = ToolResult(
                 tool_name=tool_name,
                 success=False,
-                error=f"未知工具: {tool_name}"
+                error=f"Unknown tool: {tool_name}"
             )
             self._log_execution(tool_call, result, "unknown_tool")
             return result
         
         tool = self.tools[tool_name]
         
-        # 应用噪声
+        # Apply noise
         noise_type = self._apply_noise()
         
         if noise_type == "fail":
             result = ToolResult(
                 tool_name=tool_name,
                 success=False,
-                error="工具执行失败（模拟错误）"
+                error="Tool execution failed (simulated error)"
             )
             self._log_execution(tool_call, result, "noise_fail")
             return result
@@ -146,7 +146,7 @@ class ToolExecutor:
             self._log_execution(tool_call, result, "noise_corrupt")
             return result
         
-        # 正常执行
+        # Normal execution
         try:
             exec_result = tool.execute(arguments)
             result = ToolResult(
@@ -166,10 +166,10 @@ class ToolExecutor:
             return result
     
     def _apply_noise(self) -> Optional[str]:
-        """根据噪声配置决定是否注入噪声
+        """Decide whether to inject noise based on noise config
         
         Returns:
-            噪声类型: "fail", "empty", "corrupt", 或 None（正常执行）
+            Noise type: "fail", "empty", "corrupt", or None (normal execution)
         """
         rand = random.random()
         
@@ -192,7 +192,7 @@ class ToolExecutor:
         result: ToolResult, 
         status: str
     ):
-        """记录工具执行日志"""
+        """Log tool execution"""
         self.execution_log.append({
             "tool_name": tool_call.name,
             "arguments": tool_call.arguments,
@@ -203,13 +203,13 @@ class ToolExecutor:
         })
     
     def get_execution_log(self) -> List[Dict[str, Any]]:
-        """获取执行日志"""
+        """Get execution log"""
         return self.execution_log
     
     def clear_log(self):
-        """清空执行日志"""
+        """Clear execution log"""
         self.execution_log = []
     
     def set_noise_config(self, noise_config: NoiseConfig):
-        """更新噪声配置"""
+        """Update noise configuration"""
         self.noise_config = noise_config

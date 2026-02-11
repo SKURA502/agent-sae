@@ -1,10 +1,10 @@
 """
-Sandbox Tools Module - 沙盒工具实现
+Sandbox Tools Module - Sandbox Tool Implementation
 
-提供可控、可复现的工具执行环境，支持：
-- 确定性输出
-- 噪声注入（用于 robustness 实验）
-- 完整日志记录
+Provides a controllable, reproducible tool execution environment, supporting:
+- Deterministic outputs
+- Noise injection (for robustness experiments)
+- Complete logging
 """
 
 from .tool_utils import ToolExecutor, NoiseConfig

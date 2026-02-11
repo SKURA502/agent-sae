@@ -1,7 +1,7 @@
 """
-Lookup Tool - 键值查询工具
+Lookup Tool - Key-Value Query Tool
 
-提供基于固定数据库的确定性键值查询功能。
+Provides deterministic key-value lookup functionality based on a fixed database.
 """
 
 import random
@@ -11,7 +11,7 @@ from ..tool_schema import ToolSchema
 from .tool_utils import BaseTool
 
 
-# 模拟数据库
+# Mock database
 MOCK_DATABASES = {
     "entities": {
         "Albert Einstein": {
@@ -59,20 +59,20 @@ MOCK_DATABASES = {
 
 
 class LookupTool(BaseTool):
-    """键值查询工具"""
+    """Key-Value Query Tool"""
     
     name = "lookup"
     schema = ToolSchema(
         name="lookup",
-        description="在键值数据库中查找特定条目。用于查询已知的实体信息。",
+        description="Look up specific entries in a key-value database. Used to query known entity information.",
         parameters={
             "key": {
                 "type": "string",
-                "description": "要查找的键名"
+                "description": "The key name to look up"
             },
             "database": {
                 "type": "string",
-                "description": "数据库名称（可选，默认搜索所有数据库）"
+                "description": "Database name (optional, searches all databases by default)"
             }
         },
         required=["key"]
@@ -81,54 +81,54 @@ class LookupTool(BaseTool):
     def __init__(self, databases: Optional[Dict[str, Dict]] = None):
         """
         Args:
-            databases: 数据库字典，格式为 {数据库名: {键: 值}}
+            databases: Database dictionary in format {database_name: {key: value}}
         """
         self.databases = databases or MOCK_DATABASES
     
     def execute(self, arguments: Dict[str, Any]) -> str:
-        """执行查询
+        """Execute query
         
         Args:
-            arguments: 包含 key 和可选的 database
+            arguments: Contains key and optional database
             
         Returns:
-            查询结果的格式化字符串
+            Formatted string of query results
         """
         key = arguments.get("key", "")
         database_name = arguments.get("database")
         
         if not key:
-            raise ValueError("查询键不能为空")
+            raise ValueError("Query key cannot be empty")
         
-        # 在指定数据库或所有数据库中搜索
+        # Search in specified database or all databases
         if database_name:
             if database_name not in self.databases:
-                return f"数据库 '{database_name}' 不存在"
+                return f"Database '{database_name}' does not exist"
             result = self._search_in_database(key, self.databases[database_name])
             if result:
                 return self._format_result(key, result)
         else:
-            # 搜索所有数据库
+            # Search all databases
             for db_name, db in self.databases.items():
                 result = self._search_in_database(key, db)
                 if result:
                     return self._format_result(key, result, db_name)
         
-        return f"未找到键 '{key}' 的相关信息"
+        return f"No information found for key '{key}'"
     
     def _search_in_database(self, key: str, database: Dict) -> Optional[Any]:
-        """在单个数据库中搜索"""
-        # 精确匹配
+        """Search in a single database"""
+        # Exact match
         if key in database:
             return database[key]
         
-        # 不区分大小写匹配
+        # Case-insensitive match
         key_lower = key.lower()
         for k, v in database.items():
             if k.lower() == key_lower:
                 return v
         
-        # 部分匹配
+        # Partial match
         for k, v in database.items():
             if key_lower in k.lower() or k.lower() in key_lower:
                 return v
@@ -141,10 +141,10 @@ class LookupTool(BaseTool):
         result: Any, 
         database_name: Optional[str] = None
     ) -> str:
-        """格式化查询结果"""
-        header = f"查询: {key}"
+        """Format query results"""
+        header = f"Query: {key}"
         if database_name:
-            header += f" (来源: {database_name})"
+            header += f" (source: {database_name})"
         
         if isinstance(result, dict):
             items = [f"  - {k}: {v}" for k, v in result.items()]
@@ -155,26 +155,26 @@ class LookupTool(BaseTool):
         return f"{header}\n{content}"
     
     def generate_corrupt_result(self, arguments: Dict[str, Any]) -> str:
-        """生成错误的查询结果"""
+        """Generate corrupt query results"""
         key = arguments.get("key", "")
         corrupt_responses = [
-            f"'{key}' 的信息已过时，不建议引用。",
-            f"警告：'{key}' 的数据存在争议。",
-            f"'{key}' 相关信息：[数据已删除]",
-            f"根据记录，'{key}' 不存在。请检查拼写。",
+            f"Information for '{key}' is outdated and not recommended for reference.",
+            f"Warning: Data for '{key}' is disputed.",
+            f"'{key}' related information: [data deleted]",
+            f"According to records, '{key}' does not exist. Please check spelling.",
         ]
         return random.choice(corrupt_responses)
     
     def generate_empty_result(self) -> str:
-        """生成空结果"""
-        return "查询无结果"
+        """Generate empty result"""
+        return "No query results"
     
     def add_entry(self, database: str, key: str, value: Any):
-        """添加条目"""
+        """Add entry"""
         if database not in self.databases:
             self.databases[database] = {}
         self.databases[database][key] = value
     
     def get_available_databases(self) -> list:
-        """获取可用数据库列表"""
+        """Get list of available databases"""
         return list(self.databases.keys())

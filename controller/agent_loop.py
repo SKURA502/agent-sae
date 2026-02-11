@@ -162,17 +162,17 @@ class ActivationCache:
 class AgentLoop:
     """Agent 核心循环"""
     
-    SYSTEM_PROMPT_TEMPLATE = """你是一个有帮助的AI助手。你可以使用以下工具来帮助回答问题：
+    SYSTEM_PROMPT_TEMPLATE = """You are a helpful AI assistant. You can use the following tools to help answer questions:
 
 {tool_descriptions}
 
 {output_format}
 
-重要规则：
-1. 如果你不确定答案，或者问题需要查找具体事实，请使用工具
-2. 如果你已经有足够的信息直接回答，就不要使用工具
-3. 每次只能调用一个工具
-4. 必须严格按照 JSON 格式输出"""
+Important rules:
+1. If you are unsure about the answer, or the question requires looking up specific facts, use the tools
+2. If you already have enough information to answer directly, do not use tools
+3. You can only call one tool at a time
+4. You must strictly follow the JSON format for output"""
 
     def __init__(
         self,
@@ -274,7 +274,7 @@ class AgentLoop:
         # 构建用户消息
         user_content = instruction
         if context:
-            user_content = f"背景信息：{context}\n\n问题：{instruction}"
+            user_content = f"Context: {context}\n\nQuestion: {instruction}"
         
         messages.append({"role": "user", "content": user_content})
         

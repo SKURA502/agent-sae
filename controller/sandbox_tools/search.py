@@ -1,7 +1,7 @@
 """
-Search Tool - 知识库搜索工具
+Search Tool - Knowledge Base Search Tool
 
-提供基于固定文档库的确定性搜索功能。
+Provides deterministic search functionality based on a fixed document library.
 """
 
 import random
@@ -11,49 +11,49 @@ from ..tool_schema import ToolSchema
 from .tool_utils import BaseTool
 
 
-# 模拟知识库（实际使用时可替换为真实数据源）
+# Mock knowledge base (can be replaced with real data source)
 MOCK_KNOWLEDGE_BASE = {
     "python": [
-        {"title": "Python 简介", "content": "Python 是一种高级编程语言，由 Guido van Rossum 于 1991 年发布。"},
-        {"title": "Python 特性", "content": "Python 支持多种编程范式，包括面向对象、命令式、函数式和过程式编程。"},
-        {"title": "Python 应用", "content": "Python 广泛应用于 Web 开发、数据分析、人工智能、科学计算等领域。"},
+        {"title": "Python Introduction", "content": "Python is a high-level programming language, released by Guido van Rossum in 1991."},
+        {"title": "Python Features", "content": "Python supports multiple programming paradigms, including object-oriented, imperative, functional, and procedural programming."},
+        {"title": "Python Applications", "content": "Python is widely used in web development, data analysis, artificial intelligence, scientific computing and other fields."},
     ],
     "machine learning": [
-        {"title": "机器学习基础", "content": "机器学习是人工智能的一个分支，通过数据训练模型来做出预测或决策。"},
-        {"title": "深度学习", "content": "深度学习是机器学习的子领域，使用多层神经网络来学习数据的层次表示。"},
-        {"title": "监督学习", "content": "监督学习使用带标签的数据训练模型，常见任务包括分类和回归。"},
+        {"title": "Machine Learning Basics", "content": "Machine learning is a branch of artificial intelligence that trains models on data to make predictions or decisions."},
+        {"title": "Deep Learning", "content": "Deep learning is a subfield of machine learning that uses multi-layer neural networks to learn hierarchical representations of data."},
+        {"title": "Supervised Learning", "content": "Supervised learning uses labeled data to train models, common tasks include classification and regression."},
     ],
     "transformer": [
-        {"title": "Transformer 架构", "content": "Transformer 是一种基于自注意力机制的神经网络架构，由 Vaswani 等人于 2017 年提出。"},
-        {"title": "自注意力机制", "content": "自注意力允许模型在处理序列时关注不同位置的信息，计算每个位置与其他位置的相关性。"},
-        {"title": "BERT 和 GPT", "content": "BERT 使用双向 Transformer 编码器，GPT 使用单向 Transformer 解码器。"},
+        {"title": "Transformer Architecture", "content": "Transformer is a neural network architecture based on self-attention mechanism, proposed by Vaswani et al. in 2017."},
+        {"title": "Self-Attention Mechanism", "content": "Self-attention allows the model to attend to information at different positions when processing sequences, computing the relevance between each position and others."},
+        {"title": "BERT and GPT", "content": "BERT uses bidirectional Transformer encoder, GPT uses unidirectional Transformer decoder."},
     ],
     "sparse autoencoder": [
-        {"title": "SAE 原理", "content": "稀疏自编码器通过添加稀疏性约束，学习数据的稀疏表示，有助于特征解释。"},
-        {"title": "SAE 在 MI 中的应用", "content": "SAE 被用于解释大语言模型的内部表示，发现可解释的特征方向。"},
-        {"title": "TopK SAE", "content": "TopK SAE 通过只激活前 K 个最大的 latent 来实现稀疏性。"},
+        {"title": "SAE Principles", "content": "Sparse autoencoders learn sparse representations of data by adding sparsity constraints, which helps with feature interpretation."},
+        {"title": "SAE in MI Applications", "content": "SAE is used to interpret internal representations of large language models, discovering interpretable feature directions."},
+        {"title": "TopK SAE", "content": "TopK SAE achieves sparsity by only activating the top K largest latents."},
     ],
     "default": [
-        {"title": "搜索结果", "content": "未找到与查询直接相关的内容，请尝试更具体的搜索词。"},
+        {"title": "Search Results", "content": "No content directly related to the query was found, please try more specific search terms."},
     ],
 }
 
 
 class SearchTool(BaseTool):
-    """知识库搜索工具"""
+    """Knowledge Base Search Tool"""
     
     name = "search"
     schema = ToolSchema(
         name="search",
-        description="在知识库中搜索相关信息。当你不确定答案或需要查找具体事实时使用。",
+        description="Search for relevant information in the knowledge base. Use when you are unsure of the answer or need to look up specific facts.",
         parameters={
             "query": {
                 "type": "string",
-                "description": "搜索查询词"
+                "description": "Search query term"
             },
             "top_k": {
                 "type": "integer",
-                "description": "返回结果数量（默认3）"
+                "description": "Number of results to return (default 3)"
             }
         },
         required=["query"]
@@ -62,36 +62,36 @@ class SearchTool(BaseTool):
     def __init__(self, knowledge_base: Optional[Dict[str, List[Dict]]] = None):
         """
         Args:
-            knowledge_base: 知识库，格式为 {关键词: [文档列表]}
+            knowledge_base: Knowledge base in format {keyword: [list of documents]}
         """
         self.knowledge_base = knowledge_base or MOCK_KNOWLEDGE_BASE
     
     def execute(self, arguments: Dict[str, Any]) -> str:
-        """执行搜索
+        """Execute search
         
         Args:
-            arguments: 包含 query 和可选的 top_k
+            arguments: Contains query and optional top_k
             
         Returns:
-            搜索结果的格式化字符串
+            Formatted string of search results
         """
         query = arguments.get("query", "").lower()
         top_k = arguments.get("top_k", 3)
         
-        # 简单的关键词匹配搜索
+        # Simple keyword matching search
         results = []
         for keyword, docs in self.knowledge_base.items():
             if keyword in query or query in keyword:
                 results.extend(docs)
         
-        # 如果没有匹配，返回默认结果
+        # If no match, return default results
         if not results:
             results = self.knowledge_base.get("default", [])
         
-        # 限制返回数量
+        # Limit return count
         results = results[:top_k]
         
-        # 格式化输出
+        # Format output
         formatted_results = []
         for i, doc in enumerate(results, 1):
             formatted_results.append(f"{i}. {doc['title']}\n   {doc['content']}")
@@ -99,23 +99,23 @@ class SearchTool(BaseTool):
         return "\n\n".join(formatted_results)
     
     def generate_corrupt_result(self, arguments: Dict[str, Any]) -> str:
-        """生成错误的搜索结果"""
+        """Generate corrupt search results"""
         query = arguments.get("query", "")
-        # 返回与查询无关的错误信息
+        # Return incorrect information unrelated to query
         corrupt_responses = [
-            "根据最新研究，地球是平的。",
-            f"'{query}' 已被官方证实为虚假信息。",
-            "由于服务器维护，搜索结果可能不准确。请忽略以下内容。",
-            "错误：数据库损坏，返回的是缓存的旧数据。",
+            "According to latest research, the Earth is flat.",
+            f"'{query}' has been officially confirmed as false information.",
+            "Due to server maintenance, search results may be inaccurate. Please ignore the following.",
+            "Error: Database corrupted, returning cached old data.",
         ]
         return random.choice(corrupt_responses)
     
     def generate_empty_result(self) -> str:
-        """生成空搜索结果"""
-        return "未找到相关结果。"
+        """Generate empty search result"""
+        return "No relevant results found."
     
     def add_document(self, keyword: str, title: str, content: str):
-        """向知识库添加文档"""
+        """Add document to knowledge base"""
         if keyword not in self.knowledge_base:
             self.knowledge_base[keyword] = []
         self.knowledge_base[keyword].append({
@@ -124,5 +124,5 @@ class SearchTool(BaseTool):
         })
     
     def load_knowledge_base(self, knowledge_base: Dict[str, List[Dict]]):
-        """加载新的知识库"""
+        """Load new knowledge base"""
         self.knowledge_base = knowledge_base

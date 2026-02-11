@@ -15,16 +15,46 @@ architecture:
   # decoder 是否归一化
   normalize_decoder: true
 
-# 训练配置
+# 两阶段训练配置
+# Stage 1: 通用语料预训练（OpenWebText2）
+# Stage 2: Tool-use 数据微调
+two_stage_training:
+  enabled: true
+  
+  # 第一阶段：通用预训练语料
+  stage1:
+    # 数据集
+    dataset: "openwebtext2"  # HuggingFace: Skylion007/openwebtext
+    # 目标 token 数（50-100M）
+    target_tokens: 50_000_000
+    # 每次推理的序列长度
+    seq_length: 1024
+    # 批大小
+    batch_size: 32
+    # 训练轮数
+    num_epochs: 1
+    # 学习率
+    learning_rate: 1.0e-4
+    # 采样位置：随机位置 or 序列尾部
+    sample_position: "random"
+  
+  # 第二阶段：Tool-use 数据
+  stage2:
+    # 使用第一阶段的检查点继续训练
+    continue_from_stage1: true
+    # 训练轮数
+    num_epochs: 10
+    # 学习率（通常比 stage1 小）
+    learning_rate: 5.0e-5
+    # 样本平衡：CALL vs NO_CALL
+    balance_ratio: 1.0
+
+# 训练配置（通用）
 training:
-  # 学习率
-  learning_rate: 1.0e-4
   # 权重衰减
   weight_decay: 0.0
-  # batch size
+  # batch size（用于 SAE 训练）
   batch_size: 4096
-  # 训练轮数
-  num_epochs: 10
   # 梯度累积步数
   gradient_accumulation_steps: 1
   # warmup 步数比例
@@ -36,10 +66,16 @@ training:
   # 早停耐心
   early_stopping_patience: 3
 
-# 数据配置
+# 运行时推理配置（不保存 hidden states 到磁盘）
+streaming:
+  enabled: true
+  # 激活缓冲区大小（累积多少样本后训练一次）
+  buffer_size: 8192
+  # 是否在推理过程中实时更新 SAE
+  online_training: true
+
+# 数据配置（Stage 2 tool-use 数据）
 data:
-  # 样本平衡：CALL vs NO_CALL
-  balance_ratio: 1.0
   # 只使用 action boundary window
   use_action_boundary_only: true
   # W_pre 窗口大小（tool_call 输出前的 token 数）

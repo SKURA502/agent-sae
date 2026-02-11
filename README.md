@@ -60,8 +60,8 @@ git clone https://github.com/YOUR_USERNAME/agent-sae-tooluse.git
 cd agent-sae-tooluse
 
 # Create virtual environment
-conda create -n agent-sae python=3.10 -y
-conda activate agent-sae
+conda create -n agent-tool-use python=3.12 -y
+conda activate agent-tool-use
 
 # Install dependencies
 pip install -r requirements.txt

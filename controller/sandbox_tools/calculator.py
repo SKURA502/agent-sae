@@ -1,7 +1,7 @@
 """
-Calculator Tool - 数学计算工具
+Calculator Tool - Mathematical Calculation Tool
 
-提供安全的数学表达式求值功能。
+Provides safe mathematical expression evaluation functionality.
 """
 
 import math
@@ -12,7 +12,7 @@ from ..tool_schema import ToolSchema
 from .tool_utils import BaseTool
 
 
-# 允许的数学函数
+# Allowed mathematical functions
 ALLOWED_FUNCTIONS = {
     "abs": abs,
     "round": round,
@@ -20,7 +20,7 @@ ALLOWED_FUNCTIONS = {
     "max": max,
     "sum": sum,
     "pow": pow,
-    # math 模块函数
+    # math module functions
     "sqrt": math.sqrt,
     "sin": math.sin,
     "cos": math.cos,
@@ -38,16 +38,16 @@ ALLOWED_FUNCTIONS = {
 
 
 class CalculatorTool(BaseTool):
-    """数学计算工具"""
+    """Mathematical Calculation Tool"""
     
     name = "calculator"
     schema = ToolSchema(
         name="calculator",
-        description="执行数学计算。支持基本运算和常见数学函数。",
+        description="Perform mathematical calculations. Supports basic operations and common mathematical functions.",
         parameters={
             "expression": {
                 "type": "string",
-                "description": "要计算的数学表达式，如 '2 + 3 * 4' 或 'sqrt(16)'"
+                "description": "Mathematical expression to calculate, e.g. '2 + 3 * 4' or 'sqrt(16)'"
             }
         },
         required=["expression"]
@@ -56,32 +56,32 @@ class CalculatorTool(BaseTool):
     def __init__(self, precision: int = 6):
         """
         Args:
-            precision: 结果小数精度
+            precision: Decimal precision for results
         """
         self.precision = precision
     
     def execute(self, arguments: Dict[str, Any]) -> str:
-        """执行数学计算
+        """Execute mathematical calculation
         
         Args:
-            arguments: 包含 expression 字段
+            arguments: Contains expression field
             
         Returns:
-            计算结果字符串
+            Calculation result string
         """
         expression = arguments.get("expression", "")
         
         if not expression:
-            raise ValueError("表达式不能为空")
+            raise ValueError("Expression cannot be empty")
         
-        # 安全性检查
+        # Security check
         self._validate_expression(expression)
         
-        # 执行计算
+        # Execute calculation
         try:
             result = eval(expression, {"__builtins__": {}}, ALLOWED_FUNCTIONS)
             
-            # 格式化结果
+            # Format result
             if isinstance(result, float):
                 if result.is_integer():
                     return str(int(result))
@@ -89,13 +89,13 @@ class CalculatorTool(BaseTool):
             return str(result)
             
         except ZeroDivisionError:
-            raise ValueError("除零错误")
+            raise ValueError("Division by zero error")
         except Exception as e:
-            raise ValueError(f"计算错误: {str(e)}")
+            raise ValueError(f"Calculation error: {str(e)}")
     
     def _validate_expression(self, expression: str):
-        """验证表达式安全性"""
-        # 禁止的关键词
+        """Validate expression safety"""
+        # Forbidden keywords
         forbidden = [
             "import", "exec", "eval", "open", "file",
             "__", "globals", "locals", "getattr", "setattr",
@@ -105,9 +105,9 @@ class CalculatorTool(BaseTool):
         expr_lower = expression.lower()
         for word in forbidden:
             if word in expr_lower:
-                raise ValueError(f"表达式包含不允许的关键词: {word}")
+                raise ValueError(f"Expression contains forbidden keyword: {word}")
         
-        # 只允许特定字符
+        # Only allow specific characters
         allowed_chars = set("0123456789+-*/()., ")
         allowed_chars.update(set("abcdefghijklmnopqrstuvwxyz"))
         allowed_chars.update(set("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
@@ -115,17 +115,17 @@ class CalculatorTool(BaseTool):
         
         for char in expression:
             if char not in allowed_chars:
-                raise ValueError(f"表达式包含不允许的字符: {char}")
+                raise ValueError(f"Expression contains forbidden character: {char}")
     
     def generate_corrupt_result(self, arguments: Dict[str, Any]) -> str:
-        """生成错误的计算结果"""
+        """Generate corrupt calculation result"""
         expression = arguments.get("expression", "0")
         
-        # 尝试获取正确结果并修改
+        # Try to get correct result and modify
         try:
             correct = eval(expression, {"__builtins__": {}}, ALLOWED_FUNCTIONS)
             if isinstance(correct, (int, float)):
-                # 随机扰动
+                # Random perturbation
                 corrupt_methods = [
                     lambda x: x * 2,
                     lambda x: x + random.randint(1, 100),
@@ -141,5 +141,5 @@ class CalculatorTool(BaseTool):
         return str(random.randint(-1000, 1000))
     
     def generate_empty_result(self) -> str:
-        """生成空结果"""
-        return "计算结果不可用"
+        """Generate empty result"""
+        return "Calculation result unavailable"
