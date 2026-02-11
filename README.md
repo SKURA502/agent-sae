@@ -19,23 +19,24 @@ This repository provides a research framework for understanding **why LLMs decid
 agent_sae_tooluse/
 ├── configs/                    # Configuration files
 │   ├── model_config.yaml       # Model paths & hook layers
-│   ├── sae_config.yaml         # SAE training hyperparameters
+│   ├── sae_config.yaml         # SAE training hyperparameters (two-stage)
 │   └── task_config.yaml        # Dataset & tool configurations
 ├── controller/                 # Agent controller
 │   ├── tool_schema.py          # Pydantic tool definitions
 │   ├── output_parser.py        # LLM output parsing
-│   ├── agent_loop.py           # Main agent loop with activation caching
+│   ├── agent_loop.py           # Main agent loop with streaming activations
 │   └── sandbox_tools/          # Sandbox tool implementations
 ├── tasks/                      # Data adapters
 │   ├── when2call_adapter.py    # When2Call dataset
 │   ├── bfcl_adapter.py         # BFCL dataset
 │   └── synthetic_generator.py  # Synthetic data generation
 ├── run/                        # Rollout generation
-│   ├── generate_rollouts.py    # Batch rollout generation
-│   └── cache_activations.py    # Activation caching for SAE
+│   ├── generate_rollouts.py    # Streaming rollout generation
+│   └── cache_activations.py    # Streaming activation pipeline
 ├── sae/                        # SAE training
 │   ├── sae_model.py            # TopK SAE implementation
-│   ├── train_sae.py            # SAE trainer with WandB
+│   ├── train_sae.py            # Two-stage SAE trainer
+│   ├── pretrain_data.py        # OpenWebText2 data loading & streaming
 │   └── feature_extraction.py   # Feature analysis & AUROC
 ├── analysis/                   # Mechanistic analysis
 │   ├── correlation_analysis.py # Feature-decision correlation
@@ -76,6 +77,29 @@ bash scripts/run_pipeline.sh
 
 ### Step-by-Step Execution
 
+#### Two-Stage SAE Training (Recommended)
+
+```bash
+# Stage 1: Pre-train SAE on general text (OpenWebText2, 50-100M tokens)
+# This learns general language features first
+python -m sae.train_sae stage1 \
+    --model meta-llama/Llama-3.1-8B-Instruct \
+    --layer 24 \
+    --num-tokens 50000000 \
+    --output-dir ./outputs/sae_checkpoints
+
+# Stage 2: Fine-tune on tool-use data (streaming from rollouts)
+# This specializes features for tool-use decisions
+python -m sae.train_sae stage2 \
+    --model meta-llama/Llama-3.1-8B-Instruct \
+    --layer 24 \
+    --stage1-checkpoint ./outputs/sae_checkpoints/stage1_final.pt \
+    --num-episodes 10000 \
+    --output-dir ./outputs/sae_checkpoints
+```
+
+#### Legacy Mode (Disk-based, for reference)
+
 ```bash
 # 1. Generate rollouts with activation caching
 python main.py generate-rollouts \
@@ -84,43 +108,33 @@ python main.py generate-rollouts \
     --num-samples 10000 \
     --output-dir ./outputs/rollouts
 
-# 2. Cache activations at specific layers
-python main.py cache-activations \
-    --model meta-llama/Llama-3-8B-Instruct \
-    --rollout-dir ./outputs/rollouts \
-    --layers "20,24" \
-    --output-dir ./outputs/activations
-
-# 3. Train SAE
-python main.py train-sae \
+# 2. Train SAE (legacy mode with disk storage)
+python -m sae.train_sae legacy \
     --data-path ./outputs/activations/layer_24_activations.pt \
-    --dict-size 32768 \
-    --k 128 \
-    --epochs 10 \
-    --output-dir ./outputs/sae_models/layer_24 \
-    --wandb
+    --output-dir ./outputs/sae_models/layer_24
+```
 
-# 4. Run correlation analysis
+#### Analysis
+
+```bash
+# 3. Run correlation analysis
 python main.py analyze \
     --analysis-type correlation \
-    --sae-path ./outputs/sae_models/layer_24/best_model.pt \
-    --data-path ./outputs/activations/layer_24_activations.pt \
+    --sae-path ./outputs/sae_checkpoints/stage2_final.pt \
     --layer 24 \
     --output-dir ./outputs/analysis
 
-# 5. Run linear probe
+# 4. Run linear probe
 python main.py analyze \
     --analysis-type probe \
-    --sae-path ./outputs/sae_models/layer_24/best_model.pt \
-    --data-path ./outputs/activations/layer_24_activations.pt \
+    --sae-path ./outputs/sae_checkpoints/stage2_final.pt \
     --layer 24 \
     --output-dir ./outputs/analysis
 
-# 6. Generate visualizations
+# 5. Generate visualizations
 python main.py analyze \
     --analysis-type visualize \
-    --sae-path ./outputs/sae_models/layer_24/best_model.pt \
-    --data-path ./outputs/activations/layer_24_activations.pt \
+    --sae-path ./outputs/sae_checkpoints/stage2_final.pt \
     --layer 24 \
     --output-dir ./outputs/analysis
 ```
@@ -151,12 +165,22 @@ We define the **Action Boundary Window** as the critical region around tool-call
 - **W_pre**: 20 tokens before the tool_call output token
 - **W_post**: 10 tokens after (for learning from feedback)
 
+### Two-Stage SAE Training
+
+We use a two-stage training approach for better feature quality:
+
+| Stage | Data Source | Tokens | Purpose |
+|-------|-------------|--------|--------|
+| **Stage 1** | OpenWebText2 | 50-100M | Learn general language features |
+| **Stage 2** | Tool-use rollouts | ~10k episodes | Specialize for tool-call decisions |
+
 ### SAE Configuration
 
 - **Architecture**: TopK SAE with ReLU activation
 - **Dictionary Size**: `hidden_size × 8` (expansion factor)
 - **Sparsity**: `k = hidden_size / 32` active features
 - **Hook Points**: Residual stream at 3/4 and 5/6 layer depth
+- **Streaming**: Runtime inference, no disk storage (~160GB savings)
 
 ### Analysis Metrics
 
@@ -176,24 +200,41 @@ We define the **Action Boundary Window** as the critical region around tool-call
 ## 🔬 Experiment Workflow
 
 ```
-┌─────────────────┐
-│  Generate Data  │  ← When2Call / BFCL / Synthetic
-└────────┬────────┘
+┌──────────────────────────────────────────────────────────┐
+│                    STAGE 1: Pre-training                 │
+│  OpenWebText2 (50-100M tokens) → General SAE features    │
+└────────────────────────┬─────────────────────────────────┘
+                         ▼
+┌──────────────────────────────────────────────────────────┐
+│                    STAGE 2: Fine-tuning                  │
+│  Tool-use Rollouts → Specialized tool-call features      │
+│  (Streaming: no disk storage needed)                     │
+└────────────────────────┬─────────────────────────────────┘
+                         ▼
+┌──────────────────────────────────────────────────────────┐
+│                      Analysis                            │
+│  Correlation → Linear Probe → Steering → Visualization   │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Data Flow (Streaming Mode)
+
+```
+Dataset (When2Call/BFCL)
+         │
          ▼
 ┌─────────────────┐
-│  Run Rollouts   │  ← Agent loop with activation caching
+│  Agent Rollout  │ ─── Yield activations on-the-fly
 └────────┬────────┘
+         │ (Generator)
          ▼
 ┌─────────────────┐
-│  Train SAE      │  ← TopK SAE on residual stream
+│  Memory Buffer  │ ─── Accumulate batch_size activations
 └────────┬────────┘
+         │
          ▼
 ┌─────────────────┐
-│  Analyze        │  ← Correlation, probe, steering
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│  Visualize      │  ← Paper figures
+│  SAE Training   │ ─── Online training step
 └─────────────────┘
 ```
 
@@ -219,6 +260,21 @@ sae:
   learning_rate: 1.0e-4
   batch_size: 4096
   num_epochs: 10
+
+# Two-stage training configuration
+two_stage_training:
+  stage1:
+    dataset: "Skylion007/openwebtext"
+    num_tokens: 50_000_000
+    learning_rate: 1.0e-4
+  stage2:
+    num_episodes: 10000
+    learning_rate: 1.0e-5  # Lower LR for fine-tuning
+
+# Streaming mode (no disk storage)
+streaming:
+  buffer_size: 10000
+  yield_batch_size: 4096
 ```
 
 ## 📊 Expected Results
