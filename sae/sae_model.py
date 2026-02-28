@@ -22,14 +22,6 @@ class SAEConfig:
     dict_size: int = 32768
     # TopK 的 K 值
     k: int = 128
-    # 是否使用 encoder bias
-    use_encoder_bias: bool = True
-    # 是否使用 decoder bias
-    use_decoder_bias: bool = True
-    # 是否归一化 decoder
-    normalize_decoder: bool = True
-    # 初始化标准差
-    init_std: float = 0.02
     # 设备
     device: str = "cuda"
     # 数据类型
@@ -55,18 +47,13 @@ class TopKSAE(nn.Module):
         self.config = config
         
         # Encoder: input_dim -> dict_size
-        self.encoder = nn.Linear(
-            config.input_dim,
-            config.dict_size,
-            bias=config.use_encoder_bias,
-        )
+        self.encoder = nn.Linear(config.input_dim, config.dict_size, bias=False)
         
         # Decoder: dict_size -> input_dim
-        self.decoder = nn.Linear(
-            config.dict_size,
-            config.input_dim,
-            bias=config.use_decoder_bias,
-        )
+        self.decoder = nn.Linear(config.dict_size, config.input_dim, bias=False)
+
+        # Learnable parameters
+        self.pre_bias = nn.Parameter(torch.zeros(config.input_dim))
         
         # 初始化
         self._init_weights()
@@ -77,18 +64,8 @@ class TopKSAE(nn.Module):
     
     def _init_weights(self):
         """初始化权重"""
-        # Xavier 初始化
-        nn.init.xavier_uniform_(self.encoder.weight)
-        nn.init.xavier_uniform_(self.decoder.weight)
-        
-        if self.config.use_encoder_bias:
-            nn.init.zeros_(self.encoder.bias)
-        if self.config.use_decoder_bias:
-            nn.init.zeros_(self.decoder.bias)
-        
-        # 归一化 decoder
-        if self.config.normalize_decoder:
-            self._normalize_decoder()
+        with torch.no_grad():
+            self.decoder.weight.data = self.encoder.weight.data.T.clone()
     
     def _normalize_decoder(self):
         """归一化 decoder 权重（每列归一化）"""
@@ -107,7 +84,8 @@ class TopKSAE(nn.Module):
             latent: [batch, dict_size] 稀疏激活
         """
         # 线性变换
-        pre_activation = self.encoder(x)
+        centered_x = x - self.pre_bias
+        pre_activation = self.encoder(centered_x)
         
         # TopK 稀疏化
         topk_values, topk_indices = torch.topk(
@@ -115,12 +93,12 @@ class TopKSAE(nn.Module):
         )
         
         # 创建稀疏激活
-        sparse_activation = torch.zeros_like(pre_activation)
-        sparse_activation.scatter_(-1, topk_indices, F.relu(topk_values))
+        latents = torch.zeros_like(pre_activation)
+        latents.scatter_(-1, topk_indices, F.relu(topk_values))
         
-        return sparse_activation
+        return latents
     
-    def decode(self, latent: torch.Tensor) -> torch.Tensor:
+    def decode(self, latents: torch.Tensor) -> torch.Tensor:
         """解码：latent -> reconstruction
         
         Args:
@@ -129,62 +107,49 @@ class TopKSAE(nn.Module):
         Returns:
             reconstruction: [batch, input_dim]
         """
-        return self.decoder(latent)
+        return self.decoder(latents) + self.pre_bias 
     
     def forward(
         self,
         x: torch.Tensor,
-        return_latent: bool = False,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """前向传播
         
         Args:
             x: [batch, input_dim]
-            return_latent: 是否返回 latent 激活
             
         Returns:
-            reconstruction: [batch, input_dim]
-            latent: [batch, dict_size] (可选)
+            x_hat: [batch, input_dim]
+            latent: [batch, dict_size]
         """
-        latent = self.encode(x)
-        reconstruction = self.decode(latent)
+        latents = self.encode(x)
+        x_hat = self.decode(latents)
         
-        if return_latent:
-            return reconstruction, latent
-        return reconstruction, None
+        return x_hat, latents
     
     def compute_loss(
         self,
         x: torch.Tensor,
-        return_components: bool = False,
-    ) -> torch.Tensor:
+    ) -> Tuple[torch.Tensor, dict]:
         """计算损失
         
         Args:
             x: [batch, input_dim]
-            return_components: 是否返回损失组成
             
         Returns:
-            loss: 标量损失
-            或 (loss, loss_dict) 如果 return_components=True
+            (loss, loss_dict)
         """
-        reconstruction, latent = self.forward(x, return_latent=True)
+        x_hat, latent = self.forward(x)
         
-        # 重建损失 (MSE)
-        reconstruction_loss = F.mse_loss(reconstruction, x)
+        # 重建损失 (Normalized_MSE)
+        loss = (((x_hat - x) ** 2).mean(dim=-1) / (x**2).mean(dim=-1)).mean()
+
+        loss_dict = {
+            "loss": loss.item(),
+            "mean_activation": latent[latent > 0].mean().item() if (latent > 0).any() else 0,
+        }
+        return loss, loss_dict
         
-        # 总损失（TopK SAE 不需要 L1 正则化，稀疏性由 TopK 保证）
-        total_loss = reconstruction_loss
-        
-        if return_components:
-            loss_dict = {
-                "reconstruction_loss": reconstruction_loss.item(),
-                "sparsity": (latent > 0).float().mean().item(),
-                "mean_activation": latent[latent > 0].mean().item() if (latent > 0).any() else 0,
-            }
-            return total_loss, loss_dict
-        
-        return total_loss
     
     def get_feature_activations(
         self,
@@ -199,7 +164,8 @@ class TopKSAE(nn.Module):
             values: [batch, k] TopK 激活值
             indices: [batch, k] TopK 特征索引
         """
-        pre_activation = self.encoder(x)
+        centered_x = x - self.pre_bias
+        pre_activation = self.encoder(centered_x)
         topk_values, topk_indices = torch.topk(
             pre_activation, k=self.config.k, dim=-1
         )
@@ -262,73 +228,3 @@ class TopKSAE(nn.Module):
         return model
 
 
-class VanillaSAE(nn.Module):
-    """Vanilla SAE with L1 regularization (for comparison)"""
-    
-    def __init__(self, config: SAEConfig, l1_coef: float = 1e-3):
-        super().__init__()
-        self.config = config
-        self.l1_coef = l1_coef
-        
-        self.encoder = nn.Linear(
-            config.input_dim,
-            config.dict_size,
-            bias=config.use_encoder_bias,
-        )
-        
-        self.decoder = nn.Linear(
-            config.dict_size,
-            config.input_dim,
-            bias=config.use_decoder_bias,
-        )
-        
-        self._init_weights()
-        self.to(config.device)
-    
-    def _init_weights(self):
-        nn.init.xavier_uniform_(self.encoder.weight)
-        nn.init.xavier_uniform_(self.decoder.weight)
-        if self.config.use_encoder_bias:
-            nn.init.zeros_(self.encoder.bias)
-        if self.config.use_decoder_bias:
-            nn.init.zeros_(self.decoder.bias)
-    
-    def encode(self, x: torch.Tensor) -> torch.Tensor:
-        return F.relu(self.encoder(x))
-    
-    def decode(self, latent: torch.Tensor) -> torch.Tensor:
-        return self.decoder(latent)
-    
-    def forward(
-        self,
-        x: torch.Tensor,
-        return_latent: bool = False,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
-        latent = self.encode(x)
-        reconstruction = self.decode(latent)
-        
-        if return_latent:
-            return reconstruction, latent
-        return reconstruction, None
-    
-    def compute_loss(
-        self,
-        x: torch.Tensor,
-        return_components: bool = False,
-    ) -> torch.Tensor:
-        reconstruction, latent = self.forward(x, return_latent=True)
-        
-        reconstruction_loss = F.mse_loss(reconstruction, x)
-        l1_loss = latent.abs().mean()
-        
-        total_loss = reconstruction_loss + self.l1_coef * l1_loss
-        
-        if return_components:
-            loss_dict = {
-                "reconstruction_loss": reconstruction_loss.item(),
-                "l1_loss": l1_loss.item(),
-                "sparsity": (latent > 0).float().mean().item(),
-            }
-            return total_loss, loss_dict
-        
-        return total_loss

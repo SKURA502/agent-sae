@@ -24,7 +24,7 @@ except ImportError:
 class PretrainConfig:
     """预训练数据配置"""
     # 数据集名称
-    dataset_name: str = "Skylion007/openwebtext"
+    dataset_name: str = "EleutherAI/openwebtext2"
     # 数据集子集（如果有）
     dataset_subset: Optional[str] = None
     # 目标 token 数
@@ -90,8 +90,6 @@ class ActivationStreamer:
                     layer = self.model.model.layers[layer_idx]
                 elif hasattr(self.model, 'transformer') and hasattr(self.model.transformer, 'h'):
                     layer = self.model.transformer.h[layer_idx]
-                elif hasattr(self.model, 'gpt_neox') and hasattr(self.model.gpt_neox, 'layers'):
-                    layer = self.model.gpt_neox.layers[layer_idx]
                 else:
                     raise AttributeError(f"无法找到模型的 layer 结构")
                     
@@ -332,32 +330,36 @@ class PretrainActivationBuffer:
         self,
         buffer_size: int = 8192,
         layers: Optional[List[int]] = None,
+        use_cuda_buffer: bool = False,
     ):
         """
         Args:
             buffer_size: 缓冲区大小
             layers: 层索引列表
+            use_cuda_buffer: 是否将缓冲区存储在GPU（cuda）内存，默认False为CPU
         """
         self.buffer_size = buffer_size
         self.layers = layers
+        self.use_cuda_buffer = use_cuda_buffer
         self._buffers: dict[int, List[torch.Tensor]] = {}
         self._current_size = 0
     
     def add(self, activations: dict[int, torch.Tensor]):
         """添加激活到缓冲区
-        
         Args:
             activations: {layer_idx: [batch, hidden_dim]} 激活
         """
         for layer_idx, acts in activations.items():
             if self.layers is not None and layer_idx not in self.layers:
                 continue
-            
             if layer_idx not in self._buffers:
                 self._buffers[layer_idx] = []
-            
+            # 根据use_cuda_buffer决定存储位置
+            if self.use_cuda_buffer:
+                acts = acts.cuda() if not acts.is_cuda else acts
+            else:
+                acts = acts.cpu() if acts.is_cuda else acts
             self._buffers[layer_idx].append(acts)
-        
         # 更新大小（使用第一个层的数据）
         if self._buffers:
             first_layer = list(self._buffers.keys())[0]
@@ -369,18 +371,21 @@ class PretrainActivationBuffer:
     
     def get_and_clear(self) -> dict[int, torch.Tensor]:
         """获取并清空缓冲区
-        
         Returns:
             {layer_idx: [total_samples, hidden_dim]} 合并的激活
         """
         result = {}
         for layer_idx, acts_list in self._buffers.items():
             if acts_list:
-                result[layer_idx] = torch.cat(acts_list, dim=0)
-        
+                out = torch.cat(acts_list, dim=0)
+                # 返回时也根据use_cuda_buffer决定
+                if self.use_cuda_buffer:
+                    out = out.cuda() if not out.is_cuda else out
+                else:
+                    out = out.cpu() if out.is_cuda else out
+                result[layer_idx] = out
         self._buffers = {}
         self._current_size = 0
-        
         return result
     
     @property

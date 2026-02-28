@@ -325,7 +325,7 @@ def train_sae_streaming(
         # 创建训练器
         # 注意：这里需要预先知道 input_dim
         # 可以从 Stage 1 模型获取，或者从第一个 batch 推断
-        input_dim = sae_model.config.input_dim if sae_model else sae_config.get("input_dim", 4096)
+        input_dim = sae_model.config.hidden_size if sae_model else sae_config.get("input_dim", 4096)
         
         train_config = TrainingConfig(
             input_dim=input_dim,

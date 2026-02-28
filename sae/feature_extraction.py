@@ -36,7 +36,7 @@ class FeatureExtractor:
         self.sae.eval()
         
         print(f"Loaded SAE from {sae_path}")
-        print(f"Dict size: {self.sae.config.dict_size}, K: {self.sae.config.k}")
+        print(f"Dict size: {self.sae.config.latent_size}, K: {self.sae.config.k}")
     
     @torch.no_grad()
     def extract_features(
@@ -107,7 +107,7 @@ class FeatureExtractor:
         
         stats = {
             "num_samples": len(activations),
-            "dict_size": self.sae.config.dict_size,
+            "dict_size": self.sae.config.latent_size,
             "k": self.sae.config.k,
         }
         

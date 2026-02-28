@@ -73,8 +73,8 @@ class TrainingConfig:
     def to_sae_config(self) -> SAEConfig:
         """转换为 SAE 配置"""
         return SAEConfig(
-            input_dim=self.input_dim,
-            dict_size=self.dict_size,
+            hidden_size=self.input_dim,
+            latent_size=self.dict_size,
             k=self.k,
             device=self.device,
             dtype=self.dtype,
@@ -674,7 +674,7 @@ class TwoStageTrainer:
             # 创建训练配置
             train_config = TrainingConfig(
                 input_dim=self.hidden_size,
-                dict_size=sae_model.config.dict_size if sae_model else self.hidden_size * 8,
+                dict_size=sae_model.config.latent_size if sae_model else self.hidden_size * 8,
                 k=sae_model.config.k if sae_model else self.hidden_size // 32,
                 learning_rate=tooluse_config.get("learning_rate", 5e-5),
                 batch_size=tooluse_config.get("batch_size", 4096),

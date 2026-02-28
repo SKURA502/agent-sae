@@ -130,12 +130,12 @@ def test_sae_model():
     
     config = SAEConfig(
         hidden_size=128,
-        dict_size=512,
+        latent_size=512,
         k=8,
     )
     
     sae = TopKSAE(config)
-    print(f"  ✓ Created SAE: dict_size={config.dict_size}, k={config.k}")
+    print(f"  ✓ Created SAE: dict_size={config.latent_size}, k={config.k}")
     
     # 测试前向传播
     x = torch.randn(10, 128)
