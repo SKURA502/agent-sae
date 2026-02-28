@@ -1,5 +1,5 @@
 #!/bin/bash
-# 完整实验运行脚本
+# 两阶段 SAE 实验脚本（流式 Stage 2）
 
 set -e
 
@@ -7,10 +7,12 @@ set -e
 MODEL_PATH="meta-llama/Llama-3-8B-Instruct"
 OUTPUT_BASE="./outputs"
 DEVICE="cuda"
-NUM_SAMPLES=10000
+LAYERS=(24 27)
+NUM_SAMPLES=2000
+TARGET_TOKENS=50000000
 
 echo "================================================"
-echo "Agent SAE Tool-use Research Pipeline"
+echo "Agent SAE Tool-use Two-Stage Pipeline"
 echo "================================================"
 
 # Step 1: 生成 Rollouts
@@ -20,81 +22,56 @@ python main.py generate-rollouts \
     --model $MODEL_PATH \
     --dataset synthetic \
     --num-samples $NUM_SAMPLES \
+    --layers "${LAYERS[@]}" \
     --output-dir $OUTPUT_BASE/rollouts \
     --device $DEVICE
 
-# Step 2: 缓存激活值
+# Step 2: Stage 1 训练
 echo ""
-echo "Step 2: Caching activations..."
-python main.py cache-activations \
-    --model $MODEL_PATH \
-    --rollout-dir $OUTPUT_BASE/rollouts \
-    --layers "20,24" \
-    --output-dir $OUTPUT_BASE/activations \
-    --device $DEVICE
-
-# Step 3: 训练 SAE（两阶段）
-echo ""
-echo "Step 3: Training SAE (Stage 1 - pretrain corpus)..."
+echo "Step 2: Training SAE Stage 1..."
 python -m sae.train_sae stage1 \
     --model $MODEL_PATH \
-    --layers 20 24 \
-    --output-dir $OUTPUT_BASE/sae_models \
-    --target-tokens 50000000 \
-    --data-dir data/raw \
+    --layers "${LAYERS[@]}" \
+    --output-dir $OUTPUT_BASE/sae_checkpoints \
+    --target-tokens $TARGET_TOKENS \
+    --data-dir ./data/raw/100M \
     --decoder-norm-interval 10 \
     --device $DEVICE
 
-echo "Step 3b: Training SAE (Stage 2 - tool-use data)..."
-python -m sae.train_sae stage2 \
+# Step 3: Stage 2 流式训练（复用 Stage 1 检查点）
+echo ""
+echo "Step 3: Training SAE Stage 2 (streaming)..."
+python -m run.cache_activations train \
     --model $MODEL_PATH \
-    --stage1-dir $OUTPUT_BASE/sae_models/stage1 \
-    --layers 20 24 \
-    --output-dir $OUTPUT_BASE/sae_models \
+    --dataset synthetic \
+    --num-samples $NUM_SAMPLES \
+    --layers "${LAYERS[@]}" \
+    --stage1-dir $OUTPUT_BASE/sae_checkpoints/stage1 \
+    --output-dir $OUTPUT_BASE/sae_checkpoints \
+    --target-tokens $TARGET_TOKENS \
+    --buffer-size 8192 \
+    --batch-size 4096 \
     --learning-rate 5e-5 \
-    --num-epochs 10 \
     --decoder-norm-interval 10 \
     --device $DEVICE
 
-# Step 4: 相关性分析
 echo ""
-echo "Step 4: Running correlation analysis..."
-for LAYER in 20 24; do
-    echo "Analyzing layer $LAYER..."
-    python main.py analyze \
-        --analysis-type correlation \
-        --sae-path $OUTPUT_BASE/sae_models/layer_$LAYER/best_model.pt \
-        --data-path $OUTPUT_BASE/activations/layer_${LAYER}_activations.pt \
-        --layer $LAYER \
-        --output-dir $OUTPUT_BASE/analysis/layer_$LAYER \
-        --device $DEVICE
-done
+echo "Step 4: Locating Stage 2 checkpoints..."
+python - << 'PY'
+from pathlib import Path
 
-# Step 5: 线性探测
-echo ""
-echo "Step 5: Running linear probe..."
-for LAYER in 20 24; do
-    python main.py analyze \
-        --analysis-type probe \
-        --sae-path $OUTPUT_BASE/sae_models/layer_$LAYER/best_model.pt \
-        --data-path $OUTPUT_BASE/activations/layer_${LAYER}_activations.pt \
-        --layer $LAYER \
-        --output-dir $OUTPUT_BASE/analysis/layer_$LAYER \
-        --device $DEVICE
-done
-
-# Step 6: 可视化
-echo ""
-echo "Step 6: Generating visualizations..."
-for LAYER in 20 24; do
-    python main.py analyze \
-        --analysis-type visualize \
-        --sae-path $OUTPUT_BASE/sae_models/layer_$LAYER/best_model.pt \
-        --data-path $OUTPUT_BASE/activations/layer_${LAYER}_activations.pt \
-        --layer $LAYER \
-        --output-dir $OUTPUT_BASE/analysis/layer_$LAYER \
-        --device $DEVICE
-done
+base = Path("./outputs/sae_checkpoints/stage2")
+if not base.exists():
+    print("No stage2 checkpoint directory found.")
+else:
+    files = sorted(base.glob("*-stage2.pt"))
+    if not files:
+        print("No stage2 checkpoints found.")
+    else:
+        print("Stage2 checkpoints:")
+        for p in files:
+            print(f"  {p}")
+PY
 
 echo ""
 echo "================================================"

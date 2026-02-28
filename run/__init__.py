@@ -16,7 +16,6 @@ from .cache_activations import (
     ActivationBuffer,
     create_streaming_data_pipeline,
     StreamingActivationDataset,
-    train_sae_streaming,
 )
 from .rollout_logger import RolloutLogger
 
@@ -29,7 +28,6 @@ __all__ = [
     "ActivationBuffer",
     "create_streaming_data_pipeline",
     "StreamingActivationDataset",
-    "train_sae_streaming",
     # 日志
     "RolloutLogger",
 ]

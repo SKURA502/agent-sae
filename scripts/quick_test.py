@@ -34,7 +34,7 @@ def test_imports():
         print(f"  ✗ tasks module: {e}")
     
     try:
-        from run import RolloutGenerator, ActivationCacher
+        from run import RolloutGenerator, create_streaming_data_pipeline, StreamingConfig
         print("  ✓ run module")
     except Exception as e:
         print(f"  ✗ run module: {e}")
@@ -112,10 +112,10 @@ def test_synthetic_generator():
     from tasks import SyntheticGenerator
     
     generator = SyntheticGenerator()
-    samples = generator.get_samples(5)
+    samples = generator.generate()[:5]
     
     for i, sample in enumerate(samples):
-        label_str = "CALL" if sample.label.value == 1 else "NO_CALL"
+        label_str = sample.label.value.upper()
         print(f"  Sample {i+1}: [{label_str}] {sample.instruction[:50]}...")
     
     print(f"  ✓ Generated {len(samples)} samples")
@@ -129,13 +129,13 @@ def test_sae_model():
     from sae import TopKSAE, SAEConfig
     
     config = SAEConfig(
-        hidden_size=128,
-        latent_size=512,
+        input_dim=128,
+        dict_size=512,
         k=8,
     )
     
     sae = TopKSAE(config)
-    print(f"  ✓ Created SAE: dict_size={config.latent_size}, k={config.k}")
+    print(f"  ✓ Created SAE: dict_size={config.dict_size}, k={config.k}")
     
     # 测试前向传播
     x = torch.randn(10, 128)

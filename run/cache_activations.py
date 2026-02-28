@@ -8,7 +8,7 @@ Streaming Activations - 流式激活处理工具
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import Dict, Generator, List, Optional, Tuple
 
 import torch
 from tqdm import tqdm
@@ -259,104 +259,44 @@ class StreamingActivationDataset:
                 for i in range(len(data)):
                     yield data[i], labels[i]
 
+def _load_samples(dataset: str, data_path: Optional[str], num_samples: int):
+    """按数据集类型加载样本。"""
+    from tasks import SyntheticGenerator, When2CallAdapter, BFCLAdapter
 
-def train_sae_streaming(
-    model_name: str,
-    samples: list,
-    layers: List[int],
-    output_dir: str,
-    sae_config: Optional[Dict[str, Any]] = None,
-    streaming_config: Optional[StreamingConfig] = None,
-    stage1_checkpoints: Optional[Dict[int, str]] = None,
-    device: str = "cuda",
-    dtype: str = "bfloat16",
-):
-    """流式训练 SAE（Stage 2）
-    
-    从 tool-use 任务中流式收集激活并训练 SAE。
-    
-    Args:
-        model_name: LLM 模型名称
-        samples: 任务样本
-        layers: 要训练的层
-        output_dir: 输出目录
-        sae_config: SAE 配置
-        streaming_config: 流式处理配置
-        stage1_checkpoints: Stage 1 检查点路径
-        device: 设备
-        dtype: 数据类型
-    """
-    from run.generate_rollouts import RolloutGenerator
-    from sae.train_sae import SAETrainer, TrainingConfig
-    from sae.sae_model import TopKSAE
-    
-    streaming_config = streaming_config or StreamingConfig(layers=layers)
-    sae_config = sae_config or {}
-    
-    # 创建 rollout 生成器
-    rollout_gen = RolloutGenerator(
-        model_name=model_name,
-        output_dir=output_dir,
-        cache_activations=True,
-        hook_layers=layers,
-        device=device,
-        dtype=dtype,
-    )
-    
-    # 为每层训练 SAE
+    if dataset == "synthetic":
+        generator = SyntheticGenerator()
+        return generator.generate()[:num_samples]
+
+    if dataset == "when2call":
+        adapter = When2CallAdapter(data_path or "./data/raw/when2call")
+    elif dataset == "bfcl":
+        adapter = BFCLAdapter(data_path or "./data/raw/bfcl")
+    else:
+        raise ValueError(f"Unsupported dataset: {dataset}")
+
+    adapter.load()
+    return list(adapter)[:num_samples]
+
+
+def _find_stage1_checkpoints(stage1_dir: str, layers: List[int]) -> Dict[int, str]:
+    """按 train_sae 统一命名规则查找 Stage 1 检查点。"""
+    checkpoints: Dict[int, str] = {}
+    checkpoint_dir = Path(stage1_dir)
+
     for layer in layers:
-        print(f"\n=== Training SAE for layer {layer} ===")
-        
-        # 加载 Stage 1 检查点（如果有）
-        sae_model = None
-        if stage1_checkpoints and layer in stage1_checkpoints:
-            checkpoint_path = stage1_checkpoints[layer]
-            if Path(checkpoint_path).exists():
-                print(f"Loading Stage 1 checkpoint: {checkpoint_path}")
-                sae_model = TopKSAE.load(checkpoint_path, device=device)
-        
-        # 创建流式数据管道
-        data_pipeline = create_streaming_data_pipeline(
-            rollout_gen,
-            samples,
-            streaming_config,
-        )
-        
-        # 创建训练器
-        # 注意：这里需要预先知道 input_dim
-        # 可以从 Stage 1 模型获取，或者从第一个 batch 推断
-        input_dim = sae_model.config.hidden_size if sae_model else sae_config.get("input_dim", 4096)
-        
-        train_config = TrainingConfig(
-            input_dim=input_dim,
-            dict_size=sae_config.get("dict_size", input_dim * 8),
-            k=sae_config.get("k", input_dim // 32),
-            learning_rate=sae_config.get("learning_rate", 5e-5),
-            batch_size=sae_config.get("batch_size", 4096),
-            output_dir=output_dir,
-            experiment_name=f"stage2_layer{layer}",
-            device=device,
-        )
-        
-        trainer = SAETrainer(train_config)
-        
-        if sae_model is not None:
-            trainer.model = sae_model
-            trainer.optimizer = torch.optim.AdamW(
-                trainer.model.parameters(),
-                lr=train_config.learning_rate,
-            )
-        
-        # 流式训练
-        def layer_generator():
-            for activations, labels in data_pipeline:
-                if layer in activations:
-                    yield {layer: activations[layer]}, labels
-        
-        total_steps = len(samples) * 10 // train_config.batch_size  # 估计
-        trainer.train_streaming(layer_generator(), layer, total_steps)
-    
-    print("\nStreaming training complete!")
+        matches = sorted(checkpoint_dir.glob(f"*-layer{layer}-*-stage1.pt"))
+        if matches:
+            checkpoints[layer] = str(matches[0])
+        else:
+            print(f"Warning: Stage 1 checkpoint not found for layer {layer}")
+
+    return checkpoints
+
+
+def _estimate_total_steps(num_samples: int, batch_size: int, buffer_size: int) -> int:
+    """估算流式训练总步数，用于学习率调度。"""
+    estimated_points = max(num_samples * 20, buffer_size)
+    return max(1, estimated_points // max(batch_size, 1))
 
 
 def main():
@@ -384,14 +324,28 @@ def main():
     train_parser.add_argument("--output-dir", type=str, 
                               default="./outputs/sae_checkpoints",
                               help="Output directory")
-    train_parser.add_argument("--stage1-dir", type=str, default=None,
+    train_parser.add_argument("--stage1-dir", type=str, required=True,
                               help="Stage 1 checkpoint directory")
     train_parser.add_argument("--buffer-size", type=int, default=8192,
                               help="Activation buffer size")
+    train_parser.add_argument("--target-tokens", type=int, default=50_000_000,
+                              help="Target tokens for Stage 2 checkpoint naming")
+    train_parser.add_argument("--learning-rate", type=float, default=5e-5,
+                              help="Stage 2 learning rate")
+    train_parser.add_argument("--batch-size", type=int, default=4096,
+                              help="SAE training batch size")
+    train_parser.add_argument("--num-epochs", type=int, default=10,
+                              help="Stage 2 epochs (for config tracking)")
+    train_parser.add_argument("--decoder-norm-interval", type=int, default=10,
+                              help="Apply decoder unit norm every N steps")
+    train_parser.add_argument("--use-swanlab", action="store_true",
+                              help="Use SwanLab for logging")
     train_parser.add_argument("--balance", action="store_true",
                               help="Balance CALL/NO_CALL samples")
     train_parser.add_argument("--device", type=str, default="cuda",
                               help="Device")
+    train_parser.add_argument("--dtype", type=str, default="float32",
+                              help="Model dtype for rollout inference")
     
     # info 命令：显示信息
     info_parser = subparsers.add_parser("info", help="显示工具信息")
@@ -399,50 +353,65 @@ def main():
     args = parser.parse_args()
     
     if args.command == "train":
-        # 加载数据样本
-        from tasks import SyntheticGenerator, When2CallAdapter, BFCLAdapter
-        
-        if args.dataset == "synthetic":
-            gen = SyntheticGenerator()
-            samples = gen.generate()[:args.num_samples]
-        elif args.dataset == "when2call":
-            adapter = When2CallAdapter(args.data_path or "./data/raw/when2call")
-            adapter.load()
-            samples = list(adapter)[:args.num_samples]
-        elif args.dataset == "bfcl":
-            adapter = BFCLAdapter(args.data_path or "./data/raw/bfcl")
-            adapter.load()
-            samples = list(adapter)[:args.num_samples]
-        
+        from run.generate_rollouts import RolloutGenerator
+        from sae.train_sae import TwoStageTrainer
+
+        samples = _load_samples(args.dataset, args.data_path, args.num_samples)
         print(f"Loaded {len(samples)} samples")
-        
-        # 查找 Stage 1 检查点
-        stage1_checkpoints = None
-        if args.stage1_dir:
-            stage1_dir = Path(args.stage1_dir)
-            stage1_checkpoints = {}
-            for layer in args.layers:
-                path = stage1_dir / f"stage1_layer{layer}_final.pt"
-                if path.exists():
-                    stage1_checkpoints[layer] = str(path)
-        
-        # 流式训练
+        if not args.stage1_dir:
+            raise ValueError("--stage1-dir is required for stage2 streaming training")
+
+        stage1_checkpoints = _find_stage1_checkpoints(args.stage1_dir, args.layers)
+
+        trainer = TwoStageTrainer(
+            model_name_or_path=args.model,
+            layers=args.layers,
+            output_dir=args.output_dir,
+            device=args.device,
+        )
+
+        tooluse_config = {
+            "learning_rate": args.learning_rate,
+            "batch_size": args.batch_size,
+            "num_epochs": args.num_epochs,
+            "target_tokens": args.target_tokens,
+            "decoder_norm_interval": args.decoder_norm_interval,
+            "use_swanlab": args.use_swanlab,
+        }
+        trainer.train_stage2(stage1_checkpoints=stage1_checkpoints, tooluse_config=tooluse_config)
+
         streaming_config = StreamingConfig(
             buffer_size=args.buffer_size,
             balance=args.balance,
             layers=args.layers,
             device=args.device,
         )
-        
-        train_sae_streaming(
+
+        rollout_gen = RolloutGenerator(
             model_name=args.model,
-            samples=samples,
-            layers=args.layers,
             output_dir=args.output_dir,
-            streaming_config=streaming_config,
-            stage1_checkpoints=stage1_checkpoints,
+            cache_activations=True,
+            hook_layers=args.layers,
             device=args.device,
+            dtype=args.dtype,
         )
+
+        total_steps = _estimate_total_steps(args.num_samples, args.batch_size, args.buffer_size)
+
+        for layer in args.layers:
+            print(f"\n=== Streaming Stage 2 training for layer {layer} ===")
+            data_pipeline = create_streaming_data_pipeline(rollout_gen, samples, streaming_config)
+
+            def layer_generator():
+                for activations, _ in data_pipeline:
+                    if layer in activations:
+                        yield {layer: activations[layer]}
+
+            layer_trainer = trainer.sae_trainers[layer]
+            layer_trainer.train_streaming(layer_generator(), layer=layer, total_steps=total_steps)
+            layer_trainer.save_checkpoint(f"{layer_trainer.config.experiment_name}.pt")
+
+        print("\nStreaming training complete!")
     
     elif args.command == "info" or args.command is None:
         print("""
@@ -461,6 +430,7 @@ def main():
        --dataset when2call \\
        --layers 24 27 \\
        --stage1-dir ./outputs/sae_checkpoints/stage1 \\
+    --target-tokens 50000000 \
        --output-dir ./outputs/sae_checkpoints/stage2
 
 2. 编程接口：
@@ -479,7 +449,7 @@ def main():
 ---------
 - ActivationBuffer: 激活缓冲区，支持平衡采样
 - create_streaming_data_pipeline: 创建流式数据管道
-- train_sae_streaming: 流式训练 SAE (Stage 2)
+- train 子命令：复用 sae.train_sae.TwoStageTrainer 进行 Stage 2 初始化
 
 磁盘空间节省：
 ------------

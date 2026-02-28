@@ -1,324 +1,203 @@
 # Agent SAE Tool-use
 
-**Mechanistic Interpretability of Tool-use Decision in LLM Agents**
-
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-This repository provides a research framework for understanding **why LLMs decide to use tools** through the lens of Sparse Autoencoders (SAE). We study the mechanistic basis of tool-call gating in language model agents.
+Mechanistic interpretability framework for understanding tool-use decisions in LLM agents with Sparse Autoencoders (SAE).
 
-## 🎯 Research Questions
+## Overview
 
-1. **Existence**: Are there specific SAE features that activate before tool-call decisions?
-2. **Predictability**: Can a small set of features (~50) predict CALL vs NO_CALL with high accuracy?
-3. **Causality**: Does steering/ablating these features flip the model's decision?
+This repository provides a research workflow to:
 
-## 🏗️ Architecture
+- generate agent rollouts for tool-use tasks,
+- train SAEs with a two-stage pipeline,
+- analyze feature-level CALL/NO_CALL signals,
+- run steering experiments for causal checks.
 
+## Project structure
+
+```text
+Agent-Tool-Use-MI/
+├── .gitignore
+├── LICENSE
+├── README.md
+├── requirements.txt
+├── main.py
+├── configs/
+│   └── model_config.yaml
+├── controller/
+│   ├── __init__.py
+│   ├── agent_loop.py
+│   ├── output_parser.py
+│   ├── tool_schema.py
+│   └── sandbox_tools/
+│       ├── __init__.py
+│       ├── calculator.py
+│       ├── lookup.py
+│       ├── search.py
+│       └── tool_utils.py
+├── tasks/
+│   ├── __init__.py
+│   ├── base_adapter.py
+│   ├── bfcl_adapter.py
+│   ├── synthetic_generator.py
+│   └── when2call_adapter.py
+├── run/
+│   ├── __init__.py
+│   ├── cache_activations.py
+│   ├── generate_rollouts.py
+│   └── rollout_logger.py
+├── sae/
+│   ├── __init__.py
+│   ├── feature_extraction.py
+│   ├── pretrain_data.py
+│   ├── sae_model.py
+│   └── train_sae.py
+├── analysis/
+│   ├── __init__.py
+│   ├── correlation_analysis.py
+│   ├── linear_probe.py
+│   ├── steering.py
+│   └── visualization.py
+├── scripts/
+│   ├── quick_test.py
+│   ├── run_pipeline.sh
+│   └── run_steering.sh
+├── data/
+│   ├── raw/
+│   ├── processed/
+│   └── rollouts/
+└── outputs/
+    ├── analysis_results/
+    ├── figures/
+    └── sae_checkpoints/
 ```
-agent_sae_tooluse/
-├── configs/                    # Configuration files
-│   ├── model_config.yaml       # Model paths & hook layers
-│   ├── sae_config.yaml         # SAE training hyperparameters (two-stage)
-│   └── task_config.yaml        # Dataset & tool configurations
-├── controller/                 # Agent controller
-│   ├── tool_schema.py          # Pydantic tool definitions
-│   ├── output_parser.py        # LLM output parsing
-│   ├── agent_loop.py           # Main agent loop with streaming activations
-│   └── sandbox_tools/          # Sandbox tool implementations
-├── tasks/                      # Data adapters
-│   ├── when2call_adapter.py    # When2Call dataset
-│   ├── bfcl_adapter.py         # BFCL dataset
-│   └── synthetic_generator.py  # Synthetic data generation
-├── run/                        # Rollout generation
-│   ├── generate_rollouts.py    # Streaming rollout generation
-│   └── cache_activations.py    # Streaming activation pipeline
-├── sae/                        # SAE training
-│   ├── sae_model.py            # TopK SAE implementation
-│   ├── train_sae.py            # Two-stage SAE trainer
-│   ├── pretrain_data.py        # OpenWebText2 data loading & streaming
-│   └── feature_extraction.py   # Feature analysis & AUROC
-├── analysis/                   # Mechanistic analysis
-│   ├── correlation_analysis.py # Feature-decision correlation
-│   ├── linear_probe.py         # Predictability verification
-│   ├── steering.py             # Causal intervention
-│   └── visualization.py        # Paper figure generation
-├── scripts/                    # Convenience scripts
-│   ├── run_pipeline.sh         # Full experiment pipeline
-│   ├── run_steering.sh         # Steering experiments
-│   └── quick_test.py           # Module verification
-├── main.py                     # CLI entry point
-└── requirements.txt            # Dependencies
-```
 
-## 🚀 Quick Start
-
-### Installation
+## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/agent-sae-tooluse.git
-cd agent-sae-tooluse
-
-# Create virtual environment
-conda create -n agent-tool-use python=3.12 -y
-conda activate agent-tool-use
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
-### Run Full Pipeline
+## CLI entrypoints
+
+You can use both entry styles:
+
+1. Unified entry: `python main.py ...`
+2. Module entry: `python -m ...`
+
+`main.py` forwards training-related commands to module CLIs to keep logic centralized.
+
+## Configuration
+
+### Model presets
+
+- File: `configs/model_config.yaml`
+- Purpose: stable model metadata (name, hidden size, default hook layers, etc.)
+
+### Experiment settings
+
+Use command line args for dataset, layers, training hyperparameters, output paths, and runtime options.
+
+## Quick start
+
+### A. Generate rollouts
 
 ```bash
-# Run the complete experiment pipeline
-bash scripts/run_pipeline.sh
-```
-
-### Step-by-Step Execution
-
-#### Two-Stage SAE Training (Recommended)
-
-```bash
-# Stage 1: Pre-train SAE on general text (OpenWebText2, 50-100M tokens)
-# This learns general language features first
-python -m sae.train_sae stage1 \
-    --model meta-llama/Llama-3.1-8B-Instruct \
-    --layer 24 \
-    --num-tokens 50000000 \
-    --output-dir ./outputs/sae_checkpoints
-
-# Stage 2: Fine-tune on tool-use data (streaming from rollouts)
-# This specializes features for tool-use decisions
-python -m sae.train_sae stage2 \
-    --model meta-llama/Llama-3.1-8B-Instruct \
-    --layer 24 \
-    --stage1-checkpoint ./outputs/sae_checkpoints/stage1_final.pt \
-    --num-episodes 10000 \
-    --output-dir ./outputs/sae_checkpoints
-```
-
-#### Legacy Mode (Disk-based, for reference)
-
-```bash
-# 1. Generate rollouts with activation caching
 python main.py generate-rollouts \
-    --model meta-llama/Llama-3-8B-Instruct \
-    --dataset synthetic \
-    --num-samples 10000 \
-    --output-dir ./outputs/rollouts
-
-# 2. Train SAE (legacy mode with disk storage)
-python -m sae.train_sae legacy \
-    --data-path ./outputs/activations/layer_24_activations.pt \
-    --output-dir ./outputs/sae_models/layer_24
+  --model-key llama3-8b \
+  --dataset synthetic \
+  --num-samples 1000 \
+  --layers 24 27 \
+  --output-dir ./outputs/rollouts \
+  --device cuda
 ```
 
-#### Analysis
+Override model preset directly:
 
 ```bash
-# 3. Run correlation analysis
-python main.py analyze \
-    --analysis-type correlation \
-    --sae-path ./outputs/sae_checkpoints/stage2_final.pt \
-    --layer 24 \
-    --output-dir ./outputs/analysis
-
-# 4. Run linear probe
-python main.py analyze \
-    --analysis-type probe \
-    --sae-path ./outputs/sae_checkpoints/stage2_final.pt \
-    --layer 24 \
-    --output-dir ./outputs/analysis
-
-# 5. Generate visualizations
-python main.py analyze \
-    --analysis-type visualize \
-    --sae-path ./outputs/sae_checkpoints/stage2_final.pt \
-    --layer 24 \
-    --output-dir ./outputs/analysis
+python main.py generate-rollouts \
+  --model meta-llama/Llama-3-8B-Instruct \
+  --dataset when2call \
+  --data-path ./data/raw/when2call \
+  --split test \
+  --num-samples 1000
 ```
 
-### Quick Test
+### B. Stage 1 SAE training
 
 ```bash
-# Verify all modules are working
-python scripts/quick_test.py
+python -m sae.train_sae stage1 \
+  --model meta-llama/Llama-3-8B-Instruct \
+  --layers 24 27 \
+  --target-tokens 50000000 \
+  --data-dir ./data/raw/100M \
+  --output-dir ./outputs/sae_checkpoints \
+  --device cuda
 ```
 
-## 📊 Supported Models
+Equivalent via unified entry:
 
-| Model | Hidden Size | Hook Layers (3/4, 5/6) |
-|-------|-------------|------------------------|
-| Llama-3-8B-Instruct | 4096 | 24, 27 |
-| Qwen-3-8B | 4096 | 24, 27 |
-| Qwen-3-14B | 5120 | 30, 34 |
-| Gemma-3-4B | 2560 | 21, 24 |
-| Gemma-3-12B | 3584 | 24, 27 |
-
-## 📈 Key Concepts
-
-### Action Boundary Window
-
-We define the **Action Boundary Window** as the critical region around tool-call decisions:
-
-- **W_pre**: 20 tokens before the tool_call output token
-- **W_post**: 10 tokens after (for learning from feedback)
-
-### Two-Stage SAE Training
-
-We use a two-stage training approach for better feature quality:
-
-| Stage | Data Source | Tokens | Purpose |
-|-------|-------------|--------|--------|
-| **Stage 1** | OpenWebText2 | 50-100M | Learn general language features |
-| **Stage 2** | Tool-use rollouts | ~10k episodes | Specialize for tool-call decisions |
-
-### SAE Configuration
-
-- **Architecture**: TopK SAE with ReLU activation
-- **Dictionary Size**: `hidden_size × 8` (expansion factor)
-- **Sparsity**: `k = hidden_size / 32` active features
-- **Hook Points**: Residual stream at 3/4 and 5/6 layer depth
-- **Streaming**: Runtime inference, no disk storage (~160GB savings)
-
-### Analysis Metrics
-
-1. **AUROC**: Per-feature discrimination between CALL and NO_CALL
-2. **Mean Difference**: E[f|CALL] - E[f|NO_CALL]
-3. **Flip Rate**: Proportion of decisions changed by steering
-
-## 📁 Datasets
-
-| Dataset | Purpose | Features |
-|---------|---------|----------|
-| **When2Call** | CALL vs NO_CALL gating | Minimal, focused on decision boundary |
-| **BFCL** | Function calling benchmark | Diverse API definitions |
-| **API-Bank** | End-to-end agent evaluation | Multi-step reasoning |
-| **Synthetic** | Controlled experiments | Customizable difficulty |
-
-## 🔬 Experiment Workflow
-
-```
-┌──────────────────────────────────────────────────────────┐
-│                    STAGE 1: Pre-training                 │
-│  OpenWebText2 (50-100M tokens) → General SAE features    │
-└────────────────────────┬─────────────────────────────────┘
-                         ▼
-┌──────────────────────────────────────────────────────────┐
-│                    STAGE 2: Fine-tuning                  │
-│  Tool-use Rollouts → Specialized tool-call features      │
-│  (Streaming: no disk storage needed)                     │
-└────────────────────────┬─────────────────────────────────┘
-                         ▼
-┌──────────────────────────────────────────────────────────┐
-│                      Analysis                            │
-│  Correlation → Linear Probe → Steering → Visualization   │
-└──────────────────────────────────────────────────────────┘
+```bash
+python main.py train-sae stage1 --model meta-llama/Llama-3-8B-Instruct --layers 24 27
 ```
 
-### Data Flow (Streaming Mode)
+### C. Stage 2 streaming training
 
-```
-Dataset (When2Call/BFCL)
-         │
-         ▼
-┌─────────────────┐
-│  Agent Rollout  │ ─── Yield activations on-the-fly
-└────────┬────────┘
-         │ (Generator)
-         ▼
-┌─────────────────┐
-│  Memory Buffer  │ ─── Accumulate batch_size activations
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  SAE Training   │ ─── Online training step
-└─────────────────┘
+```bash
+python -m run.cache_activations train \
+  --model meta-llama/Llama-3-8B-Instruct \
+  --dataset synthetic \
+  --num-samples 2000 \
+  --layers 24 27 \
+  --stage1-dir ./outputs/sae_checkpoints/stage1 \
+  --output-dir ./outputs/sae_checkpoints \
+  --target-tokens 50000000 \
+  --batch-size 4096 \
+  --learning-rate 5e-5 \
+  --device cuda
 ```
 
-## 📝 Configuration
+Equivalent via unified entry:
 
-### Model Configuration (`configs/model_config.yaml`)
-
-```yaml
-models:
-  llama3_8b:
-    name: "meta-llama/Llama-3-8B-Instruct"
-    hidden_size: 4096
-    num_layers: 32
-    hook_layers: [24, 27]  # 3/4 and 5/6 depth
+```bash
+python main.py cache-activations train --model meta-llama/Llama-3-8B-Instruct --dataset synthetic --layers 24 27 --stage1-dir ./outputs/sae_checkpoints/stage1
 ```
 
-### SAE Configuration (`configs/sae_config.yaml`)
+## Analysis
 
-```yaml
-sae:
-  expansion_factor: 8
-  k_divisor: 32
-  learning_rate: 1.0e-4
-  batch_size: 4096
-  num_epochs: 10
+`main.py analyze` requires serialized activations via `--data-path`:
 
-# Two-stage training configuration
-two_stage_training:
-  stage1:
-    dataset: "Skylion007/openwebtext"
-    num_tokens: 50_000_000
-    learning_rate: 1.0e-4
-  stage2:
-    num_episodes: 10000
-    learning_rate: 1.0e-5  # Lower LR for fine-tuning
-
-# Streaming mode (no disk storage)
-streaming:
-  buffer_size: 10000
-  yield_batch_size: 4096
+```bash
+python main.py analyze \
+  --analysis-type correlation \
+  --sae-path ./outputs/sae_checkpoints/stage2/<your-stage2-ckpt>.pt \
+  --data-path ./outputs/activations/layer_24_activations.pt \
+  --layer 24 \
+  --output-dir ./outputs/analysis/layer_24
 ```
 
-## 📊 Expected Results
+The same interface applies to `probe` and `visualize`.
 
-Based on our hypotheses:
+## Scripts
 
-| Metric | Expected | Significance |
-|--------|----------|--------------|
-| Top-50 features AUROC | > 0.85 | High discriminability |
-| Linear probe accuracy | > 90% | Predictable from few features |
-| Steering flip rate | > 30% | Causal influence confirmed |
+- `scripts/run_pipeline.sh`: two-stage pipeline script aligned with current checkpoint naming.
+- `scripts/run_steering.sh`: resolves stage2 checkpoints from `./outputs/sae_checkpoints/stage2`.
+- `scripts/quick_test.py`: quick API-level sanity checks.
 
-## 🤝 Contributing
+## Notes
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Checkpoint naming conventions:
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- Stage1: `*-layer{L}-*-stage1.pt`
+- Stage2: `*-layer{L}-*-stage2.pt`
 
-## 📄 License
+Both `sae.train_sae` and `run.cache_activations` use the same naming pattern.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Contributing
 
-## 🙏 Acknowledgments
+Issues and pull requests are welcome.
 
-- [Anthropic SAE Research](https://www.anthropic.com/) for pioneering SAE interpretability
-- [TransformerLens](https://github.com/neelnanda-io/TransformerLens) for activation hooking inspiration
-- [When2Call](https://arxiv.org/abs/2410.03161) for the benchmark dataset
+## License
 
-## 📚 Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@software{agent_sae_tooluse,
-  title = {Agent SAE Tool-use: Mechanistic Interpretability of Tool-use Decision in LLM Agents},
-  year = {2026},
-  url = {https://github.com/YOUR_USERNAME/agent-sae-tooluse}
-}
-```
-
-## 📧 Contact
-
-For questions or collaborations, please open an issue or contact the maintainers.
+MIT License. See [LICENSE](LICENSE).

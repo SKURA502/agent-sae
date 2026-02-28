@@ -5,13 +5,26 @@ set -e
 
 # 配置
 MODEL_PATH="meta-llama/Llama-3-8B-Instruct"
-SAE_PATH="./outputs/sae_models/layer_24/best_model.pt"
+SAE_PATH=$(python - << 'PY'
+from pathlib import Path
+
+stage2_dir = Path("./outputs/sae_checkpoints/stage2")
+matches = sorted(stage2_dir.glob("*-layer24-*-stage2.pt"))
+print(matches[0] if matches else "")
+PY
+)
 OUTPUT_DIR="./outputs/steering"
 DEVICE="cuda"
+
+if [[ -z "$SAE_PATH" ]]; then
+    echo "No Stage 2 SAE checkpoint found for layer 24 under ./outputs/sae_checkpoints/stage2"
+    exit 1
+fi
 
 echo "================================================"
 echo "Steering Experiments"
 echo "================================================"
+echo "Using SAE checkpoint: $SAE_PATH"
 
 # 从分析结果获取 top features
 ANALYSIS_DIR="./outputs/analysis/layer_24"
