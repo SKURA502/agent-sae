@@ -55,16 +55,12 @@ training:
   weight_decay: 0.0
   # batch size（用于 SAE 训练）
   batch_size: 4096
-  # 梯度累积步数
-  gradient_accumulation_steps: 1
   # warmup 步数比例
   warmup_ratio: 0.1
   # 日志间隔
   log_interval: 100
-  # 保存间隔
-  save_interval: 1000
-  # 早停耐心
-  early_stopping_patience: 3
+  # 每 N 步进行一次 decoder unit norm
+  decoder_norm_interval: 10
 
 # 运行时推理配置（不保存 hidden states 到磁盘）
 streaming:
@@ -82,8 +78,6 @@ data:
   w_pre_window: 20
   # W_post 窗口大小
   w_post_window: 10
-  # 验证集比例
-  val_ratio: 0.1
   # 随机种子
   seed: 42
 
@@ -91,10 +85,9 @@ data:
 output:
   checkpoint_dir: "./outputs/sae_checkpoints"
   log_dir: "./outputs/logs"
-  # wandb 配置
-  use_wandb: true
-  wandb_project: "agent-sae-tooluse"
-  wandb_entity: null
+  # SwanLab 配置
+  use_swanlab: true
+  swanlab_project: "agent-sae-tooluse"
 
 # 层配置（会被 model_config 覆盖）
 layers:

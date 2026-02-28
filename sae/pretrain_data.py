@@ -1,32 +1,26 @@
 """
 Pretrain Data - 通用预训练语料数据加载器
 
-支持 OpenWebText2 等通用预训练语料，用于 SAE 第一阶段训练。
-实现运行时推理，避免保存 hidden states 到磁盘。
-"""
+支持本地 JSONL 格式的预训练语料，用于 SAE 第一阶段训练。
+实现运行时推理，避免保存 hidden states 到磁盘。"""
 
+import glob
+import json
+import os
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Generator, Iterator, List, Optional, Tuple
 
 import torch
 from torch.utils.data import IterableDataset
 from tqdm import tqdm
 
-try:
-    from datasets import load_dataset
-    DATASETS_AVAILABLE = True
-except ImportError:
-    DATASETS_AVAILABLE = False
-
 
 @dataclass
 class PretrainConfig:
     """预训练数据配置"""
-    # 数据集名称
-    dataset_name: str = "EleutherAI/openwebtext2"
-    # 数据集子集（如果有）
-    dataset_subset: Optional[str] = None
+    # 本地 jsonl 数据目录
+    data_dir: str = "/data/agent_tool_use/Agent-Tool-Use-MI/data/raw/100M"
     # 目标 token 数
     target_tokens: int = 50_000_000
     # 序列长度
@@ -268,56 +262,53 @@ class ActivationStreamer:
             return [i * step for i in range(positions_per_seq)]
 
 
-class OpenWebTextDataset(IterableDataset):
-    """OpenWebText 数据集迭代器"""
-    
+class LocalJsonlDataset(IterableDataset):
+    """本地 JSONL 文件数据集迭代器
+
+    读取指定目录下所有 .jsonl 文件，每行解析为一条文本。
+    """
+
     def __init__(
         self,
-        config: PretrainConfig,
-        split: str = "train",
+        data_dir: str,
+        text_key: str = "text",
+        seed: int = 42,
     ):
         """
         Args:
-            config: 预训练配置
-            split: 数据集分割
+            data_dir: 包含 .jsonl 文件的目录路径
+            text_key: JSON 中文本字段的键名，默认 "text"
+            seed: 随机种子，用于打乱文件顺序
         """
-        if not DATASETS_AVAILABLE:
-            raise ImportError("请安装 datasets: pip install datasets")
-        
-        self.config = config
-        self.split = split
-        self._dataset = None
-    
-    def _load_dataset(self):
-        """延迟加载数据集"""
-        if self._dataset is None:
-            print(f"加载数据集: {self.config.dataset_name}")
-            self._dataset = load_dataset(
-                self.config.dataset_name,
-                self.config.dataset_subset,
-                split=self.split,
-                streaming=True,  # 使用流式加载，节省内存
-            )
-            
-            # 设置随机种子并 shuffle
-            self._dataset = self._dataset.shuffle(seed=self.config.seed)
-    
+        self.data_dir = data_dir
+        self.text_key = text_key
+        self.seed = seed
+
+        self._files = sorted(glob.glob(os.path.join(data_dir, "*.jsonl")))
+        if not self._files:
+            raise FileNotFoundError(f"在目录 {data_dir} 中未找到任何 .jsonl 文件")
+        print(f"发现 {len(self._files)} 个 jsonl 文件，共来自目录: {data_dir}")
+
     def __iter__(self) -> Iterator[str]:
         """迭代返回文本"""
-        self._load_dataset()
-        
-        for item in self._dataset:
-            # OpenWebText 的文本字段是 "text"
-            if "text" in item:
-                yield item["text"]
-            elif "content" in item:
-                yield item["content"]
-            else:
-                # 尝试获取第一个字符串字段
-                for key, value in item.items():
-                    if isinstance(value, str) and len(value) > 100:
-                        yield value
-                        break
+        files = list(self._files)
+        rng = random.Random(self.seed)
+        rng.shuffle(files)
+
+        for filepath in files:
+            with open(filepath, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        item = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    # 支持多种常见文本字段
+                    text = item.get(self.text_key) or item.get("content") or item.get("body")
+                    if text and isinstance(text, str) and len(text) > 10:
+                        yield text
 
 
 class PretrainActivationBuffer:
@@ -419,8 +410,11 @@ def create_pretrain_data_iterator(
     Yields:
         {layer_idx: [buffer_size, hidden_dim]} 激活
     """
-    # 创建数据集
-    dataset = OpenWebTextDataset(config)
+    # 创建本地 jsonl 数据集
+    dataset = LocalJsonlDataset(
+        data_dir=config.data_dir,
+        seed=config.seed,
+    )
     
     # 创建激活提取器
     streamer = ActivationStreamer(model, tokenizer, layers, device)

@@ -16,7 +16,7 @@ pydantic>=2.0.0
 # SAE Training
 # dictionary_learning  # Install from source if needed
 einops>=0.7.0
-wandb>=0.16.0
+swanlab>=0.4.0
 
 # Analysis & Visualization
 scikit-learn>=1.4.0

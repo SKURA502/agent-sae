@@ -14,7 +14,7 @@ from .feature_extraction import FeatureExtractor
 from .pretrain_data import (
     PretrainConfig,
     ActivationStreamer,
-    OpenWebTextDataset,
+    LocalJsonlDataset,
     PretrainActivationBuffer,
     create_pretrain_data_iterator,
 )
@@ -32,7 +32,7 @@ __all__ = [
     # 预训练数据
     "PretrainConfig",
     "ActivationStreamer",
-    "OpenWebTextDataset",
+    "LocalJsonlDataset",
     "PretrainActivationBuffer",
     "create_pretrain_data_iterator",
 ]

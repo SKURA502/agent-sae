@@ -33,20 +33,28 @@ python main.py cache-activations \
     --output-dir $OUTPUT_BASE/activations \
     --device $DEVICE
 
-# Step 3: 训练 SAE
+# Step 3: 训练 SAE（两阶段）
 echo ""
-echo "Step 3: Training SAE..."
-for LAYER in 20 24; do
-    echo "Training SAE for layer $LAYER..."
-    python main.py train-sae \
-        --data-path $OUTPUT_BASE/activations/layer_${LAYER}_activations.pt \
-        --dict-size 32768 \
-        --k 128 \
-        --epochs 10 \
-        --output-dir $OUTPUT_BASE/sae_models/layer_$LAYER \
-        --device $DEVICE \
-        --wandb
-done
+echo "Step 3: Training SAE (Stage 1 - pretrain corpus)..."
+python -m sae.train_sae stage1 \
+    --model $MODEL_PATH \
+    --layers 20 24 \
+    --output-dir $OUTPUT_BASE/sae_models \
+    --target-tokens 50000000 \
+    --data-dir data/raw \
+    --decoder-norm-interval 10 \
+    --device $DEVICE
+
+echo "Step 3b: Training SAE (Stage 2 - tool-use data)..."
+python -m sae.train_sae stage2 \
+    --model $MODEL_PATH \
+    --stage1-dir $OUTPUT_BASE/sae_models/stage1 \
+    --layers 20 24 \
+    --output-dir $OUTPUT_BASE/sae_models \
+    --learning-rate 5e-5 \
+    --num-epochs 10 \
+    --decoder-norm-interval 10 \
+    --device $DEVICE
 
 # Step 4: 相关性分析
 echo ""

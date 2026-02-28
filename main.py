@@ -11,7 +11,7 @@ from pathlib import Path
 from controller import AgentLoop, AgentConfig
 from tasks import When2CallAdapter, BFCLAdapter, SyntheticGenerator
 from run import RolloutGenerator, ActivationCacher
-from sae import TopKSAE, SAETrainer, FeatureExtractor
+from sae import TopKSAE, FeatureExtractor
 from analysis import CorrelationAnalyzer, LinearProbe, SteeringExperiment, Visualizer
 
 
@@ -56,20 +56,12 @@ def cmd_cache_activations(args):
 
 
 def cmd_train_sae(args):
-    """训练 SAE"""
-    from sae.train_sae import TrainingConfig
-    
-    config = TrainingConfig(
-        dict_size=args.dict_size,
-        k=args.k,
-        lr=args.lr,
-        batch_size=args.batch_size,
-        num_epochs=args.epochs,
-        use_wandb=args.wandb,
-    )
-    
-    trainer = SAETrainer(config, device=args.device)
-    trainer.train(args.data_path, output_dir=args.output_dir)
+    """训练 SAE（两阶段训练入口）"""
+    from sae.train_sae import TwoStageTrainer
+
+    print("SAE training now uses two-stage mode only.")
+    print("Please run: python -m sae.train_sae stage1 / stage2")
+    print("See sae/train_sae.py --help for details.")
 
 
 def cmd_analyze(args):
@@ -128,15 +120,7 @@ def main():
     p_cache.add_argument("--device", type=str, default="cuda")
     
     # train-sae
-    p_train = subparsers.add_parser("train-sae", help="Train SAE")
-    p_train.add_argument("--data-path", type=str, required=True)
-    p_train.add_argument("--dict-size", type=int, default=32768)
-    p_train.add_argument("--k", type=int, default=128)
-    p_train.add_argument("--lr", type=float, default=1e-4)
-    p_train.add_argument("--batch-size", type=int, default=4096)
-    p_train.add_argument("--epochs", type=int, default=10)
-    p_train.add_argument("--output-dir", type=str, default="./outputs/sae_models")
-    p_train.add_argument("--wandb", action="store_true")
+    p_train = subparsers.add_parser("train-sae", help="Train SAE (prints two-stage usage)")
     p_train.add_argument("--device", type=str, default="cuda")
     
     # analyze

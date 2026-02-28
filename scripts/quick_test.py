@@ -40,7 +40,7 @@ def test_imports():
         print(f"  ✗ run module: {e}")
     
     try:
-        from sae import TopKSAE, SAETrainer, FeatureExtractor
+        from sae import TopKSAE, SAETrainer, FeatureExtractor, TrainingConfig
         print("  ✓ sae module")
     except Exception as e:
         print(f"  ✗ sae module: {e}")
