@@ -711,10 +711,10 @@ def main():
     s1.add_argument("--output-dir", type=str, default="./outputs/sae_checkpoints")
     s1.add_argument("--target-tokens", type=int, default=50_000_000,
                      help="Target number of tokens (50-100M recommended)")
-    s1.add_argument("--seq-length", type=int, default=1024)
-    s1.add_argument("--batch-size", type=int, default=32, help="Inference batch size")
+    s1.add_argument("--seq-length", type=int, default=1024, help="Context window size for LLM inference")
+    s1.add_argument("--batch-size", type=int, default=32, help="Batch size for LLM inference forward pass")
     s1.add_argument("--sae-batch-size", type=int, default=4096,
-                     help="SAE training batch size")
+                     help="Batch size for SAE training (number of token activations)")
     s1.add_argument("--learning-rate", type=float, default=1e-4)
     s1.add_argument("--data-dir", type=str,
                      default=str(_PROJECT_ROOT / "data" / "raw" / "100M"),
@@ -736,7 +736,7 @@ def main():
     s2.add_argument("--learning-rate", type=float, default=5e-5,
                      help="Learning rate (usually smaller than stage1)")
     s2.add_argument("--num-epochs", type=int, default=10)
-    s2.add_argument("--batch-size", type=int, default=4096, help="SAE training batch size")
+    s2.add_argument("--batch-size", type=int, default=4096, help="Batch size for SAE training (number of token activations)")
     s2.add_argument("--decoder-norm-interval", type=int, default=10,
                      help="每 N 步进行一次 decoder unit norm")
     s2.add_argument("--use-swanlab", action="store_true", help="Use SwanLab for logging")

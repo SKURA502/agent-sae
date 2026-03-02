@@ -22,9 +22,10 @@ python main.py generate-rollouts \
     --model $MODEL_PATH \
     --dataset synthetic \
     --num-samples $NUM_SAMPLES \
-    --layers "${LAYERS[@]}" \
+    --hook-layers "${LAYERS[@]}" \
     --output-dir $OUTPUT_BASE/rollouts \
-    --device $DEVICE
+    --device $DEVICE \
+    --streaming
 
 # Step 2: Stage 1 训练
 echo ""
@@ -34,9 +35,14 @@ python -m sae.train_sae stage1 \
     --layers "${LAYERS[@]}" \
     --output-dir $OUTPUT_BASE/sae_checkpoints \
     --target-tokens $TARGET_TOKENS \
+    --seq-length 1024 \
+    --batch-size 32 \
+    --sae-batch-size 4096 \
+    --learning-rate 1e-4 \
     --data-dir ./data/raw/100M \
     --decoder-norm-interval 10 \
-    --device $DEVICE
+    --device $DEVICE \
+    --dtype float32
 
 # Step 3: Stage 2 流式训练（复用 Stage 1 检查点）
 echo ""
@@ -52,8 +58,10 @@ python -m run.cache_activations train \
     --buffer-size 8192 \
     --batch-size 4096 \
     --learning-rate 5e-5 \
+    --num-epochs 10 \
     --decoder-norm-interval 10 \
-    --device $DEVICE
+    --device $DEVICE \
+    --dtype float32
 
 echo ""
 echo "Step 4: Locating Stage 2 checkpoints..."

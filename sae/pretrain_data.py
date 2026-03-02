@@ -9,7 +9,7 @@ import json
 import os
 import random
 from dataclasses import dataclass, field
-from typing import Generator, Iterator, List, Optional, Tuple
+from typing import Dict, Generator, Iterator, List, Optional, Tuple
 
 import torch
 from torch.utils.data import IterableDataset
@@ -187,13 +187,12 @@ class ActivationStreamer:
                 # 统计 token 数
                 total_tokens += attention_mask.sum().item()
                 
-                # 重塑激活：[batch, positions, hidden] -> [batch * positions, hidden]
-                for layer_idx in activations:
-                    acts = activations[layer_idx]
-                    if len(acts.shape) == 3:
-                        activations[layer_idx] = acts.view(-1, acts.shape[-1])
+                activations = self._filter_and_flatten_activations(
+                    activations, input_ids.cpu(), positions
+                )
                 
-                yield activations
+                if activations:
+                    yield activations
                 
                 batch_texts = []
         
@@ -217,14 +216,53 @@ class ActivationStreamer:
             )
             
             activations = self.extract_activations(input_ids, positions)
+            activations = self._filter_and_flatten_activations(
+                activations, input_ids.cpu(), positions
+            )
             
-            for layer_idx in activations:
-                acts = activations[layer_idx]
-                if len(acts.shape) == 3:
-                    activations[layer_idx] = acts.view(-1, acts.shape[-1])
-            
-            yield activations
+            if activations:
+                yield activations
     
+    def _filter_and_flatten_activations(
+        self,
+        activations: Dict[int, torch.Tensor],
+        input_ids_cpu: torch.Tensor,
+        positions: Optional[List[int]],
+    ) -> Dict[int, torch.Tensor]:
+        """过滤特殊 token 并展平激活张量"""
+        # 收集特殊 token ID
+        special_token_ids = set()
+        for attr in ['pad_token_id', 'bos_token_id', 'eos_token_id']:
+            if hasattr(self.tokenizer, attr):
+                tok_id = getattr(self.tokenizer, attr)
+                if tok_id is not None:
+                    special_token_ids.add(tok_id)
+        
+        # 获取当前采样的 input_ids
+        if positions is not None:
+            sampled_input_ids = input_ids_cpu[:, positions]
+        else:
+            sampled_input_ids = input_ids_cpu
+            
+        # 构建 valid_mask
+        valid_mask = torch.ones_like(sampled_input_ids, dtype=torch.bool)
+        for sp_id in special_token_ids:
+            valid_mask &= (sampled_input_ids != sp_id)
+        
+        valid_mask_flat = valid_mask.view(-1)
+        
+        filtered_activations = {}
+        for layer_idx, acts in activations.items():
+            if len(acts.shape) == 3:
+                acts_flat = acts.view(-1, acts.shape[-1])
+                filtered_acts = acts_flat[valid_mask_flat]
+                if filtered_acts.size(0) > 0:
+                    filtered_activations[layer_idx] = filtered_acts
+            else:
+                filtered_activations[layer_idx] = acts
+                
+        return filtered_activations
+
     def _get_sample_positions(
         self,
         attention_mask: torch.Tensor,
