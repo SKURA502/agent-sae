@@ -15,7 +15,7 @@ class PretrainConfig:
     data_dir: str = "/data/agent_tool_use/Agent-Tool-Use-MI/data/raw/100M"
     target_tokens: int = 50_000_000
     seq_length: int = 512
-    sample_position: str = "random"   # random / last / all
+    sample_position: str = "all"   # random / last / all
     positions_per_seq: int = 1
     seed: int = 42
 
