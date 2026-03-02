@@ -74,6 +74,14 @@ def is_backup_stable(run_dir: Path, settle_seconds: float = 1.0) -> bool:
     return stable
 
 
+def get_backup_signature(run_dir: Path) -> tuple[int, int] | None:
+    backup_file = run_dir / "backup.swanlab"
+    if not backup_file.exists() or not backup_file.is_file():
+        return None
+    stat = backup_file.stat()
+    return stat.st_size, stat.st_mtime_ns
+
+
 def run_once(args: argparse.Namespace) -> int:
     cloud_run_id = read_cloud_run_id(args.run_dir)
     cmd = build_sync_cmd(args, cloud_run_id)
@@ -141,6 +149,12 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="How long to wait when checking backup.swanlab stability (default: 1.0)",
     )
+    parser.add_argument(
+        "--stop-stable-rounds",
+        type=int,
+        default=6,
+        help="Auto-stop after backup.swanlab is unchanged for N rounds (default: 6)",
+    )
     return parser.parse_args()
 
 
@@ -149,6 +163,8 @@ def main() -> None:
 
     if args.interval <= 0:
         raise ValueError("--interval must be > 0")
+    if args.stop_stable_rounds <= 0:
+        raise ValueError("--stop-stable-rounds must be > 0")
 
     if not args.run_dir.exists() or not args.run_dir.is_dir():
         raise FileNotFoundError(f"Run directory not found: {args.run_dir}")
@@ -163,11 +179,32 @@ def main() -> None:
     print(f"[INFO] run_dir={args.run_dir}")
     print(f"[INFO] interval={args.interval}s")
     print(f"[INFO] settle_seconds={args.settle_seconds}")
+    print(f"[INFO] stop_stable_rounds={args.stop_stable_rounds}")
+
+    last_signature: tuple[int, int] | None = None
+    unchanged_rounds = 0
+    synced_once = False
 
     while True:
         print(f"[INFO] {time.strftime('%F %T')} syncing...")
         if is_backup_stable(args.run_dir, args.settle_seconds):
-            run_once(args)
+            signature = get_backup_signature(args.run_dir)
+            ret = run_once(args)
+            if ret == 0:
+                synced_once = True
+
+            if signature is not None and signature == last_signature:
+                unchanged_rounds += 1
+            else:
+                unchanged_rounds = 0
+            last_signature = signature
+
+            if synced_once and unchanged_rounds >= args.stop_stable_rounds:
+                print(
+                    "[INFO] backup.swanlab has been unchanged for "
+                    f"{unchanged_rounds} rounds; assume training finished, exiting sync loop"
+                )
+                break
         time.sleep(args.interval)
 
 
