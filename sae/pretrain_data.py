@@ -73,78 +73,19 @@ class ActivationStreamer:
             cur = getattr(cur, attr)
         return cur
 
-    def _get_expected_num_layers(self) -> Optional[int]:
-        """从 config 中读取预期层数（优先 text_config）。"""
-        config = getattr(self.model, "config", None)
-        if config is None:
-            return None
-
-        text_config = getattr(config, "text_config", None)
-        if text_config is not None and hasattr(text_config, "num_hidden_layers"):
-            return int(text_config.num_hidden_layers)
-
-        if hasattr(config, "num_hidden_layers"):
-            return int(config.num_hidden_layers)
-
-        return None
-
     def _resolve_layer_container(self):
         """解析模型中的 transformer block 容器（list / ModuleList）。"""
         if self._layer_container is not None:
             return self._layer_container
 
-        expected_layers = self._get_expected_num_layers()
-
-        # 常见 HuggingFace / 多模态 / 包装模型路径
-        candidate_paths = [
-            "model.layers",
-            "model.model.layers",
-            "transformer.h",
-            "gpt_neox.layers",
-            "language_model.model.layers",
-            "language_model.layers",
-            "text_model.model.layers",
-            "text_model.layers",
-            "model.language_model.model.layers",
-            "model.language_model.layers",
-            "base_model.model.model.layers",
-            "base_model.model.layers",
-        ]
-
-        valid_candidates = []
-        for path in candidate_paths:
+        for path in ("model.layers", "model.model.layers", "transformer.h"):
             container = self._get_attr_by_path(self.model, path)
             if isinstance(container, (list, torch.nn.ModuleList)) and len(container) > 0:
-                score = 0
-                if expected_layers is not None and len(container) == expected_layers:
-                    score += 10
-                # 优先更短路径（通常更直接）
-                score -= path.count(".")
-                valid_candidates.append((score, path, container))
+                self._layer_container = container
+                print(f"检测到层容器: {path} (num_layers={len(container)})")
+                return self._layer_container
 
-        if not valid_candidates:
-            # 兜底：在命名模块中搜索长度匹配的 ModuleList
-            for name, module in self.model.named_modules():
-                if isinstance(module, torch.nn.ModuleList) and len(module) > 0:
-                    score = 0
-                    if expected_layers is not None and len(module) == expected_layers:
-                        score += 10
-                    valid_candidates.append((score, name, module))
-
-        if not valid_candidates:
-            config = getattr(self.model, "config", None)
-            arch = None
-            if config is not None:
-                arch = getattr(config, "architectures", None)
-            raise AttributeError(
-                f"无法找到模型的 layer 结构。architectures={arch}, expected_layers={expected_layers}"
-            )
-
-        valid_candidates.sort(key=lambda item: item[0], reverse=True)
-        _, best_name, best_container = valid_candidates[0]
-        self._layer_container = best_container
-        print(f"检测到层容器: {best_name} (num_layers={len(best_container)})")
-        return self._layer_container
+        raise AttributeError("无法找到模型的 layer 结构，请检查模型架构。")
         
     def _create_hook(self, layer_idx: int):
         """创建 hook 函数"""
@@ -427,30 +368,28 @@ class LocalJsonlDataset(IterableDataset):
                         yield text
 
 
-class PretrainActivationBuffer:
-    """预训练激活缓冲区
-    
-    用于累积激活数据，达到一定数量后进行 SAE 训练。
+class ActivationBuffer:
+    """激活缓冲区
+
+    用于累积激活数据，达到一定数量后用于 SAE 训练。
+    两阶段训练复用同一 buffer 实现。
     """
-    
+
     def __init__(
         self,
         buffer_size: int = 8192,
         layers: Optional[List[int]] = None,
-        use_cuda_buffer: bool = False,
     ):
         """
         Args:
             buffer_size: 缓冲区大小
-            layers: 层索引列表
-            use_cuda_buffer: 是否将缓冲区存储在GPU（cuda）内存，默认False为CPU
+            layers: 层索引列表（None 表示接受所有层）
         """
         self.buffer_size = buffer_size
         self.layers = layers
-        self.use_cuda_buffer = use_cuda_buffer
         self._buffers: dict[int, List[torch.Tensor]] = {}
         self._current_size = 0
-    
+
     def add(self, activations: dict[int, torch.Tensor]):
         """添加激活到缓冲区
         Args:
@@ -461,21 +400,16 @@ class PretrainActivationBuffer:
                 continue
             if layer_idx not in self._buffers:
                 self._buffers[layer_idx] = []
-            # 根据use_cuda_buffer决定存储位置
-            if self.use_cuda_buffer:
-                acts = acts.cuda() if not acts.is_cuda else acts
-            else:
-                acts = acts.cpu() if acts.is_cuda else acts
-            self._buffers[layer_idx].append(acts)
+            self._buffers[layer_idx].append(acts.cpu() if acts.is_cuda else acts)
         # 更新大小（使用第一个层的数据）
         if self._buffers:
             first_layer = list(self._buffers.keys())[0]
             self._current_size = sum(t.shape[0] for t in self._buffers[first_layer])
-    
+
     def is_ready(self) -> bool:
         """检查缓冲区是否达到指定大小"""
         return self._current_size >= self.buffer_size
-    
+
     def get_and_clear(self) -> dict[int, torch.Tensor]:
         """获取并清空缓冲区
         Returns:
@@ -484,17 +418,11 @@ class PretrainActivationBuffer:
         result = {}
         for layer_idx, acts_list in self._buffers.items():
             if acts_list:
-                out = torch.cat(acts_list, dim=0)
-                # 返回时也根据use_cuda_buffer决定
-                if self.use_cuda_buffer:
-                    out = out.cuda() if not out.is_cuda else out
-                else:
-                    out = out.cpu() if out.is_cuda else out
-                result[layer_idx] = out
+                result[layer_idx] = torch.cat(acts_list, dim=0)
         self._buffers = {}
         self._current_size = 0
         return result
-    
+
     @property
     def current_size(self) -> int:
         """当前缓冲区大小"""
@@ -536,7 +464,7 @@ def create_pretrain_data_iterator(
     streamer = ActivationStreamer(model, tokenizer, layers, device)
     
     # 创建缓冲区
-    buffer = PretrainActivationBuffer(buffer_size, layers)
+    buffer = ActivationBuffer(buffer_size, layers)
     
     # 流式提取激活
     total_tokens = 0

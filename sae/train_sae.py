@@ -38,24 +38,12 @@ def _make_checkpoint_name(
     target_tokens: int,
     stage: str,
 ) -> str:
-    """生成清晰的检查点文件名。
+    """生成检查点文件名。
 
-    格式: {LLM}-layer{L}-d{dict_size}-{tokens_short}-{stage}.pt
-    例如: Llama-3-8B-Instruct-layer24-d32768-100M-stage1.pt
+    格式: {LLM}-layer{L}-d{dict_size}-{tokens}M-{stage}.pt
     """
-    # 从模型路径中提取简短名称
     short_name = model_name.rstrip("/").split("/")[-1]
-
-    # 将 token 数转为可读字符串
-    if target_tokens >= 1_000_000_000:
-        tok_str = f"{target_tokens / 1e9:.0f}B"
-    elif target_tokens >= 1_000_000:
-        tok_str = f"{target_tokens / 1e6:.0f}M"
-    elif target_tokens >= 1_000:
-        tok_str = f"{target_tokens / 1e3:.0f}K"
-    else:
-        tok_str = str(target_tokens)
-
+    tok_str = f"{target_tokens / 1e6:.0f}M"
     return f"{short_name}-layer{layer}-d{int(dict_size)}-{tok_str}-{stage}.pt"
 
 
@@ -436,38 +424,19 @@ class TwoStageTrainer:
         self.sae_trainer: Optional[SAETrainer] = None
 
     def _infer_hidden_size(self) -> int:
-        """推断 LLM 文本 hidden size（优先 text_config，兼容多模态模型）。"""
+        """推断 LLM hidden size。"""
         config = getattr(self.model, "config", None)
+        if config is None:
+            raise ValueError("模型缺少 config 属性，无法推断 hidden_size")
 
-        if config is not None:
-            text_config = getattr(config, "text_config", None)
-            if text_config is not None and hasattr(text_config, "hidden_size"):
-                return int(text_config.hidden_size)
+        text_config = getattr(config, "text_config", None)
+        if text_config is not None and hasattr(text_config, "hidden_size"):
+            return int(text_config.hidden_size)
 
-            for attr in ("hidden_size", "d_model", "n_embd"):
-                if hasattr(config, attr):
-                    value = getattr(config, attr)
-                    if value is not None:
-                        return int(value)
+        if hasattr(config, "hidden_size"):
+            return int(config.hidden_size)
 
-        # 结构兜底：尝试从输入 embedding 读取
-        for emb_path in (
-            "model.embed_tokens",
-            "language_model.model.embed_tokens",
-            "model.language_model.model.embed_tokens",
-            "transformer.wte",
-        ):
-            cur = self.model
-            ok = True
-            for part in emb_path.split("."):
-                if not hasattr(cur, part):
-                    ok = False
-                    break
-                cur = getattr(cur, part)
-            if ok and hasattr(cur, "embedding_dim"):
-                return int(cur.embedding_dim)
-
-        return 4096
+        raise ValueError(f"无法从模型 config 推断 hidden_size: {type(config)}")
 
     def _load_llm(self):
         """加载 LLM 模型"""
@@ -741,58 +710,32 @@ class TwoStageTrainer:
 
 
 def main():
-    """命令行入口 — 仅保留两阶段训练"""
+    """命令行入口 — 两阶段训练"""
+    from utils import add_common_args, add_sae_args
+
     parser = argparse.ArgumentParser(description="Train SAE (Two-Stage)")
     subparsers = parser.add_subparsers(dest="command", help="训练阶段")
 
     # ---- Stage 1 ----
     s1 = subparsers.add_parser("stage1", help="Stage 1: 预训练语料训练")
-    s1.add_argument("--model", type=str, required=True, help="LLM model name or path")
-    s1.add_argument("--layer", type=int, default=24,
-                     help="Target layer to train SAE on")
+    add_common_args(s1)
+    add_sae_args(s1)
+    s1.add_argument("--layer", type=int, default=24)
     s1.add_argument("--output-dir", type=str, default="./outputs/sae_checkpoints")
-    s1.add_argument("--target-tokens", type=int, default=50_000_000,
-                     help="Target number of tokens (50-100M recommended)")
-    s1.add_argument("--seq-length", type=int, default=1024, help="Context window size for LLM inference")
-    s1.add_argument("--batch-size", type=int, default=32, help="Batch size for LLM inference forward pass")
-    s1.add_argument("--sae-batch-size", type=int, default=4096,
-                     help="Batch size for SAE training (number of token activations)")
-    s1.add_argument("--learning-rate", type=float, default=1e-5)
-    s1.add_argument("--dict-size", type=int, default=None,
-                     help="SAE dictionary size (default: hidden_size * 8)")
-    s1.add_argument("--k", type=int, default=None,
-                     help="SAE top-k sparsity (default: hidden_size // 32)")
+    s1.add_argument("--seq-length", type=int, default=1024)
+    s1.add_argument("--inference-batch-size", type=int, default=32,
+                     help="Batch size for LLM inference forward pass")
     s1.add_argument("--data-dir", type=str,
-                     default=str(_PROJECT_ROOT / "data" / "raw" / "100M"),
-                     help="本地 JSONL 数据目录")
-    s1.add_argument("--decoder-norm-interval", type=int, default=10,
-                     help="每 N 步进行一次 decoder unit norm")
-    s1.add_argument("--use-swanlab", action="store_true", help="Use SwanLab for logging")
-    s1.add_argument("--device", type=str, default="cuda")
-    s1.add_argument("--dtype", type=str, default="float32")
+                     default=str(_PROJECT_ROOT / "data" / "raw" / "100M"))
 
     # ---- Stage 2 ----
     s2 = subparsers.add_parser("stage2", help="Stage 2: Tool-use 数据训练")
-    s2.add_argument("--model", type=str, required=True, help="LLM model name or path")
+    add_common_args(s2)
+    add_sae_args(s2)
+    s2.add_argument("--layer", type=int, default=24)
+    s2.add_argument("--output-dir", type=str, default="./outputs/sae_checkpoints")
     s2.add_argument("--stage1-dir", type=str, required=True,
                      help="Stage 1 checkpoint directory")
-    s2.add_argument("--layer", type=int, default=24,
-                    help="Target layer to train SAE on")
-    s2.add_argument("--output-dir", type=str, default="./outputs/sae_checkpoints")
-    s2.add_argument("--target-tokens", type=int, default=50_000_000)
-    s2.add_argument("--learning-rate", type=float, default=5e-5,
-                     help="Learning rate (usually smaller than stage1)")
-    s2.add_argument("--dict-size", type=int, default=None,
-                     help="SAE dictionary size (only used when no stage1 checkpoint)")
-    s2.add_argument("--k", type=int, default=None,
-                     help="SAE top-k sparsity (only used when no stage1 checkpoint)")
-    s2.add_argument("--num-epochs", type=int, default=1)
-    s2.add_argument("--batch-size", type=int, default=4096, help="Batch size for SAE training (number of token activations)")
-    s2.add_argument("--decoder-norm-interval", type=int, default=10,
-                     help="每 N 步进行一次 decoder unit norm")
-    s2.add_argument("--use-swanlab", action="store_true", help="Use SwanLab for logging")
-    s2.add_argument("--device", type=str, default="cuda")
-    s2.add_argument("--dtype", type=str, default="float32")
 
     args = parser.parse_args()
 
@@ -809,15 +752,14 @@ def main():
             "data_dir": args.data_dir,
             "target_tokens": args.target_tokens,
             "seq_length": args.seq_length,
-            "batch_size": args.batch_size,
+            "batch_size": args.inference_batch_size,
         }
 
         sae_config = {
-            "batch_size": args.sae_batch_size,
+            "batch_size": args.batch_size,
             "learning_rate": args.learning_rate,
             "dict_size": args.dict_size,
             "k": args.k,
-            "decoder_norm_interval": args.decoder_norm_interval,
             "use_swanlab": args.use_swanlab,
         }
 
@@ -847,12 +789,10 @@ def main():
 
         tooluse_config = {
             "learning_rate": args.learning_rate,
-            "num_epochs": args.num_epochs,
             "batch_size": args.batch_size,
             "dict_size": args.dict_size,
             "k": args.k,
             "target_tokens": args.target_tokens,
-            "decoder_norm_interval": args.decoder_norm_interval,
             "use_swanlab": args.use_swanlab,
         }
 

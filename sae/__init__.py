@@ -15,7 +15,7 @@ from .pretrain_data import (
     PretrainConfig,
     ActivationStreamer,
     LocalJsonlDataset,
-    PretrainActivationBuffer,
+    ActivationBuffer,
     create_pretrain_data_iterator,
 )
 
@@ -33,6 +33,6 @@ __all__ = [
     "PretrainConfig",
     "ActivationStreamer",
     "LocalJsonlDataset",
-    "PretrainActivationBuffer",
+    "ActivationBuffer",
     "create_pretrain_data_iterator",
 ]

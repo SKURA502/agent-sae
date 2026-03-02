@@ -76,7 +76,7 @@ def cmd_generate_rollouts(args):
 
 def cmd_cache_activations(args):
     """透传到 run.cache_activations CLI。"""
-    forward_args = args.cache_args if args.cache_args else ["info"]
+    forward_args = args.cache_args if args.cache_args else ["--help"]
     cmd = [sys.executable, "-m", "run.cache_activations", *forward_args]
     subprocess.run(cmd, check=True)
 

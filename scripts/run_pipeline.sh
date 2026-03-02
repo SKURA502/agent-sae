@@ -36,18 +36,17 @@ python -m sae.train_sae stage1 \
     --output-dir $OUTPUT_BASE/sae_checkpoints \
     --target-tokens $TARGET_TOKENS \
     --seq-length 1024 \
-    --batch-size 32 \
-    --sae-batch-size 4096 \
+    --inference-batch-size 32 \
+    --batch-size 4096 \
     --learning-rate 1e-4 \
     --data-dir ./data/raw/100M \
-    --decoder-norm-interval 10 \
     --device $DEVICE \
     --dtype float32
 
 # Step 3: Stage 2 流式训练（复用 Stage 1 检查点）
 echo ""
 echo "Step 3: Training SAE Stage 2 (streaming)..."
-python -m run.cache_activations train \
+python -m run.cache_activations \
     --model $MODEL_PATH \
     --dataset synthetic \
     --num-samples $NUM_SAMPLES \
@@ -58,8 +57,6 @@ python -m run.cache_activations train \
     --buffer-size 8192 \
     --batch-size 4096 \
     --learning-rate 5e-5 \
-    --num-epochs 10 \
-    --decoder-norm-interval 10 \
     --device $DEVICE \
     --dtype float32
 
