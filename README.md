@@ -23,8 +23,6 @@ Agent-Tool-Use-MI/
 ├── README.md
 ├── requirements.txt
 ├── main.py
-├── configs/
-│   └── model_config.yaml
 ├── controller/
 │   ├── __init__.py
 │   ├── agent_loop.py
@@ -61,6 +59,7 @@ Agent-Tool-Use-MI/
 │   └── visualization.py
 ├── scripts/
 │   ├── quick_test.py
+│   ├── model_config.yaml
 │   ├── run_pipeline.sh
 │   └── run_steering.sh
 ├── data/

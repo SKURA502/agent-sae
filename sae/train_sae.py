@@ -11,14 +11,11 @@ Train SAE - SAE 训练脚本
 
 import argparse
 import json
-import re
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional
 
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
@@ -27,9 +24,6 @@ try:
     SWANLAB_AVAILABLE = True
 except ImportError:
     SWANLAB_AVAILABLE = False
-
-import sys
-sys.path.append(str(Path(__file__).parent.parent))
 
 # 项目根目录（相对于本文件: sae/ -> Agent-Tool-Use-MI/）
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -62,7 +56,7 @@ def _make_checkpoint_name(
     else:
         tok_str = str(target_tokens)
 
-    return f"{short_name}-layer{layer}-d{dict_size}-{tok_str}-{stage}.pt"
+    return f"{short_name}-layer{layer}-d{int(dict_size)}-{tok_str}-{stage}.pt"
 
 
 @dataclass
@@ -83,7 +77,7 @@ class TrainingConfig:
     decoder_norm_interval: int = 10
 
     # 日志配置
-    log_interval: int = 1
+    log_interval: int = 10
 
     # 输出配置
     output_dir: str = "./outputs/sae_checkpoints"
@@ -115,6 +109,7 @@ class SAETrainer:
         self.config = config
         self.output_dir = Path(config.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self._swanlab_active = False
 
         # 初始化模型
         sae_config = config.to_sae_config()
@@ -135,18 +130,24 @@ class SAETrainer:
                 project=config.swanlab_project,
                 experiment_name=config.experiment_name,
                 config=vars(config),
+                mode="offline",
+                logdir="swanlog",
             )
+            self._swanlab_active = True
+
+    def _finish_swanlab(self):
+        if self._swanlab_active and SWANLAB_AVAILABLE:
+            swanlab.finish()
+            self._swanlab_active = False
 
     def train(
         self,
         train_data: torch.Tensor,
-        labels: Optional[torch.Tensor] = None,
     ) -> Dict[str, Any]:
         """训练 SAE
 
         Args:
             train_data: [num_samples, input_dim] 训练数据
-            labels: [num_samples] 标签（用于监控，可选）
 
         Returns:
             训练统计信息
@@ -174,20 +175,23 @@ class SAETrainer:
             "train_losses": [],
         }
 
-        for epoch in range(self.config.num_epochs):
-            epoch_loss = self._train_epoch(train_loader, scheduler, epoch)
-            training_stats["train_losses"].append(epoch_loss)
-            print(
-                f"Epoch {epoch+1}/{self.config.num_epochs}: "
-                f"train_loss={epoch_loss:.4f}"
-            )
+        try:
+            for epoch in range(self.config.num_epochs):
+                epoch_loss = self._train_epoch(train_loader, scheduler, epoch)
+                training_stats["train_losses"].append(epoch_loss)
+                print(
+                    f"Epoch {epoch+1}/{self.config.num_epochs}: "
+                    f"train_loss={epoch_loss:.4f}"
+                )
 
-        # 保存训练统计
-        stats_path = self.output_dir / f"{self.config.experiment_name}_stats.json"
-        with open(stats_path, "w") as f:
-            json.dump(training_stats, f, indent=2)
+            # 保存训练统计
+            stats_path = self.output_dir / f"{self.config.experiment_name}_stats.json"
+            with open(stats_path, "w") as f:
+                json.dump(training_stats, f, indent=2)
 
-        return training_stats
+            return training_stats
+        finally:
+            self._finish_swanlab()
 
     def _train_epoch(
         self,
@@ -204,6 +208,7 @@ class SAETrainer:
 
         for batch_idx, (batch,) in enumerate(pbar):
             batch = batch.to(self.config.device)
+            self.optimizer.zero_grad(set_to_none=True)
 
             # 前向传播
             loss, loss_dict = self.model.compute_loss(batch)
@@ -213,7 +218,6 @@ class SAETrainer:
 
             self.optimizer.step()
             scheduler.step()
-            self.optimizer.zero_grad()
 
             self.global_step += 1
 
@@ -239,7 +243,7 @@ class SAETrainer:
                 if self.config.use_swanlab and SWANLAB_AVAILABLE:
                     swanlab.log(log_data)
                 else:
-                    print(
+                    tqdm.write(
                         f"[Step {self.global_step}] "
                         f"loss={loss.item():.4f} "
                         f"recon={loss_dict['loss']:.4f} "
@@ -315,7 +319,7 @@ class SAETrainer:
         scheduler = self._get_scheduler(total_steps, num_warmup_steps)
 
         training_stats: Dict[str, list] = {
-            "train_losses": [],
+            "interval_avg_losses": [],
             "steps": [],
         }
 
@@ -325,77 +329,79 @@ class SAETrainer:
 
         pbar = tqdm(total=total_steps, desc="Streaming training")
 
-        for activations in activation_generator:
-            if layer not in activations:
-                continue
+        try:
+            for activations in activation_generator:
+                if layer not in activations:
+                    continue
 
-            batch_data = activations[layer]
+                batch_data = activations[layer]
 
-            # 如果是 3D，展平
-            if len(batch_data.shape) == 3:
-                batch_data = batch_data.view(-1, batch_data.shape[-1])
+                # 如果是 3D，展平
+                if len(batch_data.shape) == 3:
+                    batch_data = batch_data.view(-1, batch_data.shape[-1])
 
-            # 分批训练
-            for i in range(0, len(batch_data), self.config.batch_size):
-                batch = batch_data[i : i + self.config.batch_size].to(
-                    self.config.device
-                )
+                # 分批训练
+                for i in range(0, len(batch_data), self.config.batch_size):
+                    batch = batch_data[i : i + self.config.batch_size].to(
+                        self.config.device
+                    )
+                    self.optimizer.zero_grad(set_to_none=True)
 
-                # 前向传播
-                loss, loss_dict = self.model.compute_loss(batch)
+                    # 前向传播
+                    loss, loss_dict = self.model.compute_loss(batch)
 
-                # 反向传播
-                loss.backward()
+                    # 反向传播
+                    loss.backward()
 
-                self.optimizer.step()
-                scheduler.step()
-                self.optimizer.zero_grad()
+                    self.optimizer.step()
+                    scheduler.step()
 
-                self.global_step += 1
+                    self.global_step += 1
 
-                # Decoder unit-norm
-                if self.global_step % self.config.decoder_norm_interval == 0:
-                    self.model._normalize_decoder()
+                    # Decoder unit-norm
+                    if self.global_step % self.config.decoder_norm_interval == 0:
+                        self.model._normalize_decoder()
 
-                running_loss += loss.item()
-                num_batches += 1
+                    running_loss += loss.item()
+                    num_batches += 1
 
-                pbar.update(1)
-                pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+                    pbar.update(1)
+                    pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
-                # 日志
-                if self.global_step % self.config.log_interval == 0 and num_batches > 0:
-                    avg_loss = running_loss / num_batches
-                    training_stats["train_losses"].append(avg_loss)
-                    training_stats["steps"].append(self.global_step)
+                    # 日志
+                    if self.global_step % self.config.log_interval == 0 and num_batches > 0:
+                        avg_loss = running_loss / num_batches
+                        training_stats["interval_avg_losses"].append(avg_loss)
+                        training_stats["steps"].append(self.global_step)
 
-                    log_data = {
-                        "train/loss": avg_loss,
-                        "train/mean_activation": loss_dict["mean_activation"],
-                        "train/lr": scheduler.get_last_lr()[0],
-                        "global_step": self.global_step,
-                    }
-                    if self.config.use_swanlab and SWANLAB_AVAILABLE:
-                        swanlab.log(log_data)
-                    else:
-                        print(
-                            f"[Step {self.global_step}] "
-                            f"loss={avg_loss:.4f} "
-                            f"mean_act={loss_dict['mean_activation']:.4f} "
-                            f"lr={scheduler.get_last_lr()[0]:.2e}"
-                        )
+                        log_data = {
+                            "train/loss": avg_loss,
+                            "train/mean_activation": loss_dict["mean_activation"],
+                            "train/lr": scheduler.get_last_lr()[0],
+                            "global_step": self.global_step,
+                        }
+                        if self.config.use_swanlab and SWANLAB_AVAILABLE:
+                            swanlab.log(log_data)
+                        else:
+                            tqdm.write(
+                                f"[Step {self.global_step}] "
+                                f"loss={avg_loss:.4f} "
+                                f"mean_act={loss_dict['mean_activation']:.4f} "
+                                f"lr={scheduler.get_last_lr()[0]:.2e}"
+                            )
 
-                    running_loss = 0.0
-                    num_batches = 0
+                        running_loss = 0.0
+                        num_batches = 0
 
-        pbar.close()
+            # 保存训练统计
+            stats_path = self.output_dir / f"{self.config.experiment_name}_stats.json"
+            with open(stats_path, "w") as f:
+                json.dump(training_stats, f, indent=2)
 
-        # 保存训练统计
-        stats_path = self.output_dir / f"{self.config.experiment_name}_stats.json"
-        with open(stats_path, "w") as f:
-            json.dump(training_stats, f, indent=2)
-
-        return training_stats
+            return training_stats
+        finally:
+            pbar.close()
+            self._finish_swanlab()
 
 
 class TwoStageTrainer:
@@ -578,6 +584,7 @@ class TwoStageTrainer:
                 use_swanlab=sae_config.get("use_swanlab", False),
                 swanlab_project=sae_config.get("swanlab_project", "agent-tool-use"),
                 device=self.device,
+                dtype=self.dtype,
             )
 
             trainer = SAETrainer(train_config)
@@ -613,12 +620,12 @@ class TwoStageTrainer:
         print("\nStage 1 training complete!")
         return checkpoint_paths
 
-    def train_stage2(
+    def init_stage2(
         self,
         stage1_checkpoints: Dict[int, str],
         tooluse_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[int, str]:
-        """第二阶段训练：Tool-use 任务激活（初始化训练器，由外部提供数据）
+        """第二阶段初始化：Tool-use 任务激活训练器（由外部提供数据）
 
         Args:
             stage1_checkpoints: Stage 1 检查点路径
@@ -691,6 +698,7 @@ class TwoStageTrainer:
                 use_swanlab=tooluse_config.get("use_swanlab", False),
                 swanlab_project=tooluse_config.get("swanlab_project", "agent-tool-use"),
                 device=self.device,
+                dtype=self.dtype,
             )
 
             trainer = SAETrainer(train_config)
@@ -708,6 +716,14 @@ class TwoStageTrainer:
             checkpoint_paths[layer] = str(self.output_dir / "stage2" / ckpt_name)
 
         return checkpoint_paths
+
+    def train_stage2(
+        self,
+        stage1_checkpoints: Dict[int, str],
+        tooluse_config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[int, str]:
+        """兼容旧接口：等价于 init_stage2。"""
+        return self.init_stage2(stage1_checkpoints, tooluse_config)
 
     def train_stage2_streaming(
         self,
@@ -862,7 +878,7 @@ def main():
             "use_swanlab": args.use_swanlab,
         }
 
-        checkpoints = trainer.train_stage2(stage1_checkpoints, tooluse_config)
+        checkpoints = trainer.init_stage2(stage1_checkpoints, tooluse_config)
 
         print("\nStage 2 initialized! Ready for tool-use data.")
         print("Use the streaming API to provide tool-use activations.")
