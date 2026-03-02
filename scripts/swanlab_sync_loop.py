@@ -152,7 +152,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--stop-stable-rounds",
         type=int,
-        default=6,
+        default=3,
         help="Auto-stop after backup.swanlab is unchanged for N rounds (default: 6)",
     )
     return parser.parse_args()
