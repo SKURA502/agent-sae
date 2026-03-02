@@ -123,10 +123,21 @@ def run_once(args: argparse.Namespace) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Loop swanlab sync for a single run directory")
     parser.add_argument(
+        "--latest",
+        action="store_true",
+        help="Use the latest run-* directory under --swanlog-dir; if set, --run-dir is optional",
+    )
+    parser.add_argument(
         "--run-dir",
         type=Path,
-        required=True,
+        required=False,
         help="Path to one SwanLab offline run directory (run-xxxx)",
+    )
+    parser.add_argument(
+        "--swanlog-dir",
+        type=Path,
+        default=Path("./swanlog"),
+        help="Root swanlog directory used by --latest (default: ./swanlog)",
     )
     parser.add_argument(
         "--interval",
@@ -172,6 +183,30 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def resolve_run_dir(args: argparse.Namespace) -> Path:
+    if args.latest:
+        if not args.swanlog_dir.exists() or not args.swanlog_dir.is_dir():
+            raise FileNotFoundError(f"Swanlog directory not found: {args.swanlog_dir}")
+
+        candidates = [
+            path for path in args.swanlog_dir.glob("run-*")
+            if path.is_dir()
+        ]
+        if not candidates:
+            raise FileNotFoundError(f"No run-* directory found under: {args.swanlog_dir}")
+
+        # 优先按目录名中的时间戳排序（run-YYYYMMDD_HHMMSS-xxxx）
+        candidates.sort(key=lambda p: p.name)
+        selected = candidates[-1]
+        print(f"[INFO] auto selected latest run_dir: {selected}")
+        return selected
+
+    if args.run_dir is None:
+        raise ValueError("--run-dir is required when --latest is not set")
+
+    return args.run_dir
+
+
 def main() -> None:
     args = parse_args()
 
@@ -181,6 +216,8 @@ def main() -> None:
         raise ValueError("--stop-stable-rounds must be > 0")
     if args.stop_idle_seconds <= 0:
         raise ValueError("--stop-idle-seconds must be > 0")
+
+    args.run_dir = resolve_run_dir(args)
 
     if not args.run_dir.exists() or not args.run_dir.is_dir():
         raise FileNotFoundError(f"Run directory not found: {args.run_dir}")
