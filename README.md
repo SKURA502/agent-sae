@@ -130,7 +130,7 @@ python -m sae.train_sae stage1 \
   --model meta-llama/Llama-3-8B-Instruct \
   --layers 24 27 \
   --target-tokens 50000000 \
-  --data-dir ./data/raw/100M \
+  --data-dir ./data/raw/pretrain \
   --output-dir ./outputs/sae_checkpoints \
   --device cuda
 ```

@@ -12,9 +12,9 @@ from tqdm import tqdm
 @dataclass
 class PretrainConfig:
     """预训练数据配置"""
-    data_dir: str = "/data/agent_tool_use/Agent-Tool-Use-MI/data/raw/100M"
+    data_dir: str = "/data/agent_tool_use/Agent-Tool-Use-MI/data/raw/pretrain"
     target_tokens: int = 50_000_000
-    seq_length: int = 512
+    seq_length: int = 1024
     sample_position: str = "all"   # random / last / all
     positions_per_seq: int = 1
     seed: int = 42

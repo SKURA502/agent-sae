@@ -7,12 +7,12 @@ current_model: "llama3-8b"
 # 模型配置
 models:
   llama3-8b:
-    name: "meta-llama/Llama-3-8B-Instruct"
-    local_path: "/data/models/llama3-8b"
+    name: "meta-llama/Llama-3.1-8B-Instruct"
+    local_path: "/data/models/Llama-3.1-8B-Instruct"
     hidden_size: 4096
     num_layers: 32
-    # Hook 层位置（3/4 和 5/6 位置）
-    hook_layers: [24, 27]
+    # Hook 层位置（3/4位置）
+    hook_layer: 24
     # 残差流 hook 点名称
     hook_point: "model.layers.{layer}.post_attention_layernorm"
     # 是否为 tool-tuned 模型
@@ -20,18 +20,18 @@ models:
   
   qwen3-4b:
     name: "Qwen/Qwen3-4B"
-    local_path: "/data/models/Qwen3-4b"
-    hidden_size: 3072
-    num_layers: 26
-    hook_layers: [20, 22]
+    local_path: "/data/models/Qwen3-4B"
+    hidden_size: 2560
+    num_layers: 36
+    hook_layer: 27
     hook_point: "model.layers.{layer}.post_attention_layernorm"
     is_tool_tuned: true
 
   qwen3-8b:
     name: "Qwen/Qwen3-8B"
-    local_path: "/data/models/Qwen3-8b"
+    local_path: "/data/models/Qwen3-8B"
     hidden_size: 4096
-    num_layers: 32
+    num_layers: 36
     hook_layers: [24, 27]
     hook_point: "model.layers.{layer}.post_attention_layernorm"
     is_tool_tuned: true
@@ -48,8 +48,8 @@ models:
   gemma3-4b:
     name: "google/gemma-3-4b-it"
     local_path: "/data/models/gemma-3-4b-it"
-    hidden_size: 3072
-    num_layers: 26
+    hidden_size: 2560
+    num_layers: 34
     hook_layers: [20, 22]
     hook_point: "model.layers.{layer}.post_attention_layernorm"
     is_tool_tuned: true

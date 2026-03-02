@@ -377,7 +377,7 @@ class TwoStageTrainer:
 
         pt_cfg = PretrainConfig(
             data_dir=pc.get(
-                "data_dir", str(_PROJECT_ROOT / "data" / "raw" / "100M"),
+                "data_dir", str(_PROJECT_ROOT / "data" / "raw" / "pretrain"),
             ),
             target_tokens=target_tokens, seq_length=seq_length,
             sample_position=sample_pos, positions_per_seq=positions_per_seq,
@@ -499,11 +499,11 @@ def main():
 
     s1 = sub.add_parser("stage1", help="Stage 1: pretrain corpus")
     _add_stage_args(s1)
-    s1.add_argument("--seq-length", type=int, default=512)
+    s1.add_argument("--seq-length", type=int, default=1024)
     s1.add_argument("--inference-batch-size", type=int, default=64,
                     help="LLM inference batch size")
     s1.add_argument("--data-dir", type=str,
-                    default=str(_PROJECT_ROOT / "data" / "raw" / "100M"))
+                    default=str(_PROJECT_ROOT / "data" / "raw" / "pretrain"))
 
     s2 = sub.add_parser("stage2", help="Stage 2: tool-use data")
     _add_stage_args(s2)

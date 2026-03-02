@@ -39,7 +39,7 @@ python -m sae.train_sae stage1 \
     --inference-batch-size 32 \
     --batch-size 4096 \
     --learning-rate 1e-4 \
-    --data-dir ./data/raw/100M \
+    --data-dir ./data/raw/pretrain \
     --device $DEVICE \
     --dtype float32
 
