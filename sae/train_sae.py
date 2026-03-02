@@ -35,7 +35,7 @@ def _make_checkpoint_name(
     """格式: {LLM}-layer{L}-d{dict_size}-{tokens}M-{stage}.pt"""
     short = model_name.rstrip("/").split("/")[-1]
     tok = f"{target_tokens / 1e6:.0f}M"
-    return f"{short}-layer{layer}-d{int(dict_size)}-{tok}-{stage}.pt"
+    return f"{short}-L{layer}-d{int(dict_size)}-{tok}-{stage}.pt"
 
 
 @dataclass
@@ -87,10 +87,7 @@ class SAETrainer:
             )
             self._swanlab_active = True
 
-    # ------------------------------------------------------------------
     # Core training
-    # ------------------------------------------------------------------
-
     def train_batch(self, batch: torch.Tensor, scheduler: Any) -> Dict[str, float]:
         """单 batch 训练步。"""
         batch = batch.to(self.config.device)
@@ -198,10 +195,7 @@ class SAETrainer:
             pbar.close()
             self._finish_swanlab()
 
-    # ------------------------------------------------------------------
     # Checkpoint
-    # ------------------------------------------------------------------
-
     def save_checkpoint(self, name: str):
         path = self.output_dir / name
         self.model.save(str(path))
@@ -214,10 +208,7 @@ class SAETrainer:
         )
         print(f"Loaded checkpoint from {checkpoint_path}")
 
-    # ------------------------------------------------------------------
     # Internal helpers
-    # ------------------------------------------------------------------
-
     def _make_scheduler(self, total: int, warmup: int):
         from torch.optim.lr_scheduler import LambdaLR
 
@@ -277,10 +268,6 @@ class SAETrainer:
             self._swanlab_active = False
 
 
-# ======================================================================
-# Two-Stage Trainer
-# ======================================================================
-
 class TwoStageTrainer:
     """两阶段 SAE 训练器（Stage 1: 预训练语料 / Stage 2: Tool-use）"""
 
@@ -300,10 +287,7 @@ class TwoStageTrainer:
         self.hidden_size: Optional[int] = None
         self.sae_trainer: Optional[SAETrainer] = None
 
-    # ------------------------------------------------------------------
     # LLM loading
-    # ------------------------------------------------------------------
-
     def _load_llm(self):
         if self.model is not None:
             return
@@ -337,10 +321,7 @@ class TwoStageTrainer:
         self.hidden_size = int(hs)
         print(f"LLM loaded. Hidden size: {self.hidden_size}")
 
-    # ------------------------------------------------------------------
     # Helpers
-    # ------------------------------------------------------------------
-
     def _resolve_dict_k(self, overrides: Dict[str, Any], sae_model=None):
         """从 overrides / checkpoint / 默认值推断 dict_size 与 k。"""
         req_d, req_k = overrides.get("dict_size"), overrides.get("k")
@@ -374,10 +355,6 @@ class TwoStageTrainer:
             swanlab_project=cfg.get("swanlab_project", "agent-tool-use"),
             device=self.device, dtype=self.dtype,
         )
-
-    # ------------------------------------------------------------------
-    # Stage 1
-    # ------------------------------------------------------------------
 
     def train_stage1(
         self,
@@ -432,10 +409,6 @@ class TwoStageTrainer:
         trainer.save_checkpoint(ckpt_name)
         print("Stage 1 complete!")
         return {layer: str(self.output_dir / "stage1" / ckpt_name)}
-
-    # ------------------------------------------------------------------
-    # Stage 2
-    # ------------------------------------------------------------------
 
     def init_stage2(
         self,
@@ -509,10 +482,6 @@ class TwoStageTrainer:
         return paths
 
 
-# ======================================================================
-# CLI
-# ======================================================================
-
 def _add_stage_args(parser: argparse.ArgumentParser):
     """stage1 / stage2 共享参数。"""
     from utils import add_common_args, add_sae_args
@@ -530,8 +499,8 @@ def main():
 
     s1 = sub.add_parser("stage1", help="Stage 1: pretrain corpus")
     _add_stage_args(s1)
-    s1.add_argument("--seq-length", type=int, default=1024)
-    s1.add_argument("--inference-batch-size", type=int, default=32,
+    s1.add_argument("--seq-length", type=int, default=512)
+    s1.add_argument("--inference-batch-size", type=int, default=64,
                     help="LLM inference batch size")
     s1.add_argument("--data-dir", type=str,
                     default=str(_PROJECT_ROOT / "data" / "raw" / "100M"))
