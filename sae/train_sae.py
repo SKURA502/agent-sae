@@ -207,37 +207,21 @@ class SAETrainer:
         pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}")
 
         for batch_idx, (batch,) in enumerate(pbar):
-            batch = batch.to(self.config.device)
-            self.optimizer.zero_grad(set_to_none=True)
+            metrics = self.train_batch(batch, scheduler)
 
-            # 前向传播
-            loss, loss_dict = self.model.compute_loss(batch)
-
-            # 反向传播
-            loss.backward()
-
-            self.optimizer.step()
-            scheduler.step()
-
-            self.global_step += 1
-
-            # Decoder unit-norm
-            if self.global_step % self.config.decoder_norm_interval == 0:
-                self.model._normalize_decoder()
-
-            total_loss += loss.item()
+            total_loss += metrics["loss"]
             num_batches += 1
 
             # 更新进度条
-            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+            pbar.set_postfix({"loss": f"{metrics['loss']:.4f}"})
 
             # 日志
             if self.global_step % self.config.log_interval == 0:
                 log_data = {
-                    "train/loss": loss.item(),
-                    "train/reconstruction_loss": loss_dict["loss"],
-                    "train/mean_activation": loss_dict["mean_activation"],
-                    "train/lr": scheduler.get_last_lr()[0],
+                    "train/loss": metrics["loss"],
+                    "train/reconstruction_loss": metrics["reconstruction_loss"],
+                    "train/mean_activation": metrics["mean_activation"],
+                    "train/lr": metrics["lr"],
                     "global_step": self.global_step,
                 }
                 if self.config.use_swanlab and SWANLAB_AVAILABLE:
@@ -245,10 +229,10 @@ class SAETrainer:
                 else:
                     tqdm.write(
                         f"[Step {self.global_step}] "
-                        f"loss={loss.item():.4f} "
-                        f"recon={loss_dict['loss']:.4f} "
-                        f"mean_act={loss_dict['mean_activation']:.4f} "
-                        f"lr={scheduler.get_last_lr()[0]:.2e}"
+                        f"loss={metrics['loss']:.4f} "
+                        f"recon={metrics['reconstruction_loss']:.4f} "
+                        f"mean_act={metrics['mean_activation']:.4f} "
+                        f"lr={metrics['lr']:.2e}"
                     )
 
         return total_loss / max(num_batches, 1)
@@ -289,6 +273,34 @@ class SAETrainer:
             lr=self.config.learning_rate,
         )
         print("Checkpoint loaded successfully")
+
+    def train_batch(
+        self,
+        batch: torch.Tensor,
+        scheduler: Any,
+    ) -> Dict[str, float]:
+        """执行单个 batch 训练步骤。"""
+        batch = batch.to(self.config.device)
+        self.optimizer.zero_grad(set_to_none=True)
+
+        loss, loss_dict = self.model.compute_loss(batch)
+        loss.backward()
+
+        self.optimizer.step()
+        scheduler.step()
+
+        self.global_step += 1
+
+        if self.global_step % self.config.decoder_norm_interval == 0:
+            self.model._normalize_decoder()
+
+        return {
+            "loss": float(loss.item()),
+            "reconstruction_loss": float(loss_dict["loss"]),
+            "mean_activation": float(loss_dict["mean_activation"]),
+            "lr": float(scheduler.get_last_lr()[0]),
+            "global_step": float(self.global_step),
+        }
 
     def train_streaming(
         self,
@@ -342,31 +354,14 @@ class SAETrainer:
 
                 # 分批训练
                 for i in range(0, len(batch_data), self.config.batch_size):
-                    batch = batch_data[i : i + self.config.batch_size].to(
-                        self.config.device
-                    )
-                    self.optimizer.zero_grad(set_to_none=True)
+                    batch = batch_data[i : i + self.config.batch_size]
+                    metrics = self.train_batch(batch, scheduler)
 
-                    # 前向传播
-                    loss, loss_dict = self.model.compute_loss(batch)
-
-                    # 反向传播
-                    loss.backward()
-
-                    self.optimizer.step()
-                    scheduler.step()
-
-                    self.global_step += 1
-
-                    # Decoder unit-norm
-                    if self.global_step % self.config.decoder_norm_interval == 0:
-                        self.model._normalize_decoder()
-
-                    running_loss += loss.item()
+                    running_loss += metrics["loss"]
                     num_batches += 1
 
                     pbar.update(1)
-                    pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+                    pbar.set_postfix({"loss": f"{metrics['loss']:.4f}"})
 
                     # 日志
                     if self.global_step % self.config.log_interval == 0 and num_batches > 0:
@@ -376,8 +371,8 @@ class SAETrainer:
 
                         log_data = {
                             "train/loss": avg_loss,
-                            "train/mean_activation": loss_dict["mean_activation"],
-                            "train/lr": scheduler.get_last_lr()[0],
+                            "train/mean_activation": metrics["mean_activation"],
+                            "train/lr": metrics["lr"],
                             "global_step": self.global_step,
                         }
                         if self.config.use_swanlab and SWANLAB_AVAILABLE:
@@ -386,8 +381,8 @@ class SAETrainer:
                             tqdm.write(
                                 f"[Step {self.global_step}] "
                                 f"loss={avg_loss:.4f} "
-                                f"mean_act={loss_dict['mean_activation']:.4f} "
-                                f"lr={scheduler.get_last_lr()[0]:.2e}"
+                                f"mean_act={metrics['mean_activation']:.4f} "
+                                f"lr={metrics['lr']:.2e}"
                             )
 
                         running_loss = 0.0
@@ -414,7 +409,7 @@ class TwoStageTrainer:
     def __init__(
         self,
         model_name_or_path: str,
-        layers: List[int],
+        layer: int,
         output_dir: str = "./outputs/sae_checkpoints",
         device: str = "cuda",
         dtype: str = "float32",
@@ -422,13 +417,13 @@ class TwoStageTrainer:
         """
         Args:
             model_name_or_path: LLM 模型路径
-            layers: 要训练 SAE 的层
+            layer: 要训练 SAE 的目标层
             output_dir: 输出目录
             device: 设备
             dtype: 数据类型
         """
         self.model_name_or_path = model_name_or_path
-        self.layers = layers
+        self.layer = int(layer)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.device = device
@@ -438,8 +433,7 @@ class TwoStageTrainer:
         self.model = None
         self.tokenizer = None
 
-        # SAE 训练器（每层一个）
-        self.sae_trainers: Dict[int, SAETrainer] = {}
+        self.sae_trainer: Optional[SAETrainer] = None
 
     def _infer_hidden_size(self) -> int:
         """推断 LLM 文本 hidden size（优先 text_config，兼容多模态模型）。"""
@@ -561,74 +555,65 @@ class TwoStageTrainer:
         print(f"  Target tokens: {target_tokens:,}")
         print(f"  Dict size: {dict_size}, K: {k}")
 
-        checkpoint_paths: Dict[int, str] = {}
+        layer = self.layer
+        print(f"\n=== Training layer {layer} ===")
 
-        for layer in self.layers:
-            print(f"\n=== Training layer {layer} ===")
+        ckpt_name = _make_checkpoint_name(
+            self.model_name_or_path, layer, dict_size, target_tokens, "stage1"
+        )
 
-            # 检查点文件名
-            ckpt_name = _make_checkpoint_name(
-                self.model_name_or_path, layer, dict_size, target_tokens, "stage1"
+        train_config = TrainingConfig(
+            input_dim=self.hidden_size,
+            dict_size=dict_size,
+            k=k,
+            learning_rate=sae_config.get("learning_rate", 1e-5),
+            batch_size=sae_config.get("batch_size", 4096),
+            decoder_norm_interval=sae_config.get("decoder_norm_interval", 10),
+            log_interval=sae_config.get("log_interval", 1),
+            output_dir=str(self.output_dir / "stage1"),
+            experiment_name=ckpt_name.replace(".pt", ""),
+            use_swanlab=sae_config.get("use_swanlab", False),
+            swanlab_project=sae_config.get("swanlab_project", "agent-tool-use"),
+            device=self.device,
+            dtype=self.dtype,
+        )
+
+        trainer = SAETrainer(train_config)
+        self.sae_trainer = trainer
+
+        if pt_config.sample_position == "all":
+            estimated_samples = target_tokens
+        else:
+            estimated_samples = (
+                target_tokens // pt_config.seq_length * pt_config.positions_per_seq
             )
+        total_steps = max(estimated_samples // train_config.batch_size, 1)
 
-            train_config = TrainingConfig(
-                input_dim=self.hidden_size,
-                dict_size=dict_size,
-                k=k,
-                learning_rate=sae_config.get("learning_rate", 1e-5),
-                batch_size=sae_config.get("batch_size", 4096),
-                decoder_norm_interval=sae_config.get("decoder_norm_interval", 10),
-                log_interval=sae_config.get("log_interval", 1),
-                output_dir=str(self.output_dir / "stage1"),
-                experiment_name=ckpt_name.replace(".pt", ""),
-                use_swanlab=sae_config.get("use_swanlab", False),
-                swanlab_project=sae_config.get("swanlab_project", "agent-tool-use"),
-                device=self.device,
-                dtype=self.dtype,
-            )
+        activation_gen = create_pretrain_data_iterator(
+            model=self.model,
+            tokenizer=self.tokenizer,
+            config=pt_config,
+            layers=[layer],
+            batch_size=pretrain_config.get("batch_size", 32),
+            buffer_size=sae_config.get("buffer_size", 8192),
+            device=self.device,
+        )
 
-            trainer = SAETrainer(train_config)
-            self.sae_trainers[layer] = trainer
-
-            # 创建激活生成器
-            activation_gen = create_pretrain_data_iterator(
-                model=self.model,
-                tokenizer=self.tokenizer,
-                config=pt_config,
-                layers=[layer],
-                batch_size=pretrain_config.get("batch_size", 32),
-                buffer_size=sae_config.get("buffer_size", 8192),
-                device=self.device,
-            )
-
-            # 估计总步数
-            if pt_config.sample_position == "all":
-                estimated_samples = target_tokens
-            else:
-                estimated_samples = (
-                    target_tokens // pt_config.seq_length * pt_config.positions_per_seq
-                )
-            total_steps = estimated_samples // train_config.batch_size
-
-            # 流式训练
-            trainer.train_streaming(activation_gen, layer, total_steps)
-
-            # 保存最终检查点（清晰命名）
-            trainer.save_checkpoint(ckpt_name)
-            checkpoint_paths[layer] = str(self.output_dir / "stage1" / ckpt_name)
+        trainer.train_streaming(activation_gen, layer, total_steps)
+        trainer.save_checkpoint(ckpt_name)
 
         print("\nStage 1 training complete!")
-        return checkpoint_paths
+        return {layer: str(self.output_dir / "stage1" / ckpt_name)}
 
     def init_stage2(
         self,
-        stage1_checkpoints: Dict[int, str],
+        stage1_checkpoint: Optional[str],
         tooluse_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[int, str]:
         """第二阶段初始化：Tool-use 任务激活训练器（由外部提供数据）
 
         Args:
-            stage1_checkpoints: Stage 1 检查点路径
+            stage1_checkpoint: Stage 1 检查点路径
             tooluse_config: Tool-use 训练配置
 
         Returns:
@@ -641,93 +626,85 @@ class TwoStageTrainer:
 
         print("Stage 2: Training SAE on tool-use data")
 
-        checkpoint_paths: Dict[int, str] = {}
+        layer = self.layer
+        print(f"\n=== Training layer {layer} ===")
 
-        for layer in self.layers:
-            print(f"\n=== Training layer {layer} ===")
+        requested_dict_size = tooluse_config.get("dict_size")
+        requested_k = tooluse_config.get("k")
+        if stage1_checkpoint and Path(stage1_checkpoint).exists():
+            print(f"Loading Stage 1 checkpoint: {stage1_checkpoint}")
+            sae_model = TopKSAE.load(stage1_checkpoint, device=self.device)
+        else:
+            print(
+                f"Warning: No Stage 1 checkpoint for layer {layer}, "
+                "training from scratch"
+            )
+            sae_model = None
 
-            # 从 Stage 1 加载检查点
-            stage1_path = stage1_checkpoints.get(layer)
-            requested_dict_size = tooluse_config.get("dict_size")
-            requested_k = tooluse_config.get("k")
-            if stage1_path and Path(stage1_path).exists():
-                print(f"Loading Stage 1 checkpoint: {stage1_path}")
-                sae_model = TopKSAE.load(stage1_path, device=self.device)
-            else:
+        if sae_model:
+            dict_size = sae_model.config.dict_size
+            k_val = sae_model.config.k
+            if requested_dict_size is not None and int(requested_dict_size) != int(dict_size):
                 print(
-                    f"Warning: No Stage 1 checkpoint for layer {layer}, "
-                    "training from scratch"
+                    f"Warning: stage1 checkpoint dict_size={dict_size}，"
+                    f"忽略传入的 --dict-size={requested_dict_size}"
                 )
-                sae_model = None
+            if requested_k is not None and int(requested_k) != int(k_val):
+                print(
+                    f"Warning: stage1 checkpoint k={k_val}，"
+                    f"忽略传入的 --k={requested_k}"
+                )
+        else:
+            dict_size = int(requested_dict_size) if requested_dict_size is not None else self.hidden_size * 8
+            k_val = int(requested_k) if requested_k is not None else self.hidden_size // 32
 
-            if sae_model:
-                dict_size = sae_model.config.dict_size
-                k_val = sae_model.config.k
-                if requested_dict_size is not None and int(requested_dict_size) != int(dict_size):
-                    print(
-                        f"Warning: stage1 checkpoint dict_size={dict_size}，"
-                        f"忽略传入的 --dict-size={requested_dict_size}"
-                    )
-                if requested_k is not None and int(requested_k) != int(k_val):
-                    print(
-                        f"Warning: stage1 checkpoint k={k_val}，"
-                        f"忽略传入的 --k={requested_k}"
-                    )
-            else:
-                dict_size = int(requested_dict_size) if requested_dict_size is not None else self.hidden_size * 8
-                k_val = int(requested_k) if requested_k is not None else self.hidden_size // 32
+        print(f"  Dict size: {dict_size}, K: {k_val}")
 
-            print(f"  Dict size: {dict_size}, K: {k_val}")
+        ckpt_name = _make_checkpoint_name(
+            self.model_name_or_path, layer, dict_size, target_tokens, "stage2"
+        )
 
-            # 检查点文件名
-            ckpt_name = _make_checkpoint_name(
-                self.model_name_or_path, layer, dict_size, target_tokens, "stage2"
+        train_config = TrainingConfig(
+            input_dim=self.hidden_size,
+            dict_size=dict_size,
+            k=k_val,
+            learning_rate=tooluse_config.get("learning_rate", 5e-5),
+            batch_size=tooluse_config.get("batch_size", 4096),
+            num_epochs=tooluse_config.get("num_epochs", 1),
+            decoder_norm_interval=tooluse_config.get("decoder_norm_interval", 10),
+            log_interval=tooluse_config.get("log_interval", 1),
+            output_dir=str(self.output_dir / "stage2"),
+            experiment_name=ckpt_name.replace(".pt", ""),
+            use_swanlab=tooluse_config.get("use_swanlab", False),
+            swanlab_project=tooluse_config.get("swanlab_project", "agent-tool-use"),
+            device=self.device,
+            dtype=self.dtype,
+        )
+
+        trainer = SAETrainer(train_config)
+
+        if sae_model is not None:
+            trainer.model = sae_model
+            trainer.optimizer = torch.optim.AdamW(
+                trainer.model.parameters(),
+                lr=train_config.learning_rate,
             )
 
-            train_config = TrainingConfig(
-                input_dim=self.hidden_size,
-                dict_size=dict_size,
-                k=k_val,
-                learning_rate=tooluse_config.get("learning_rate", 5e-5),
-                batch_size=tooluse_config.get("batch_size", 4096),
-                num_epochs=tooluse_config.get("num_epochs", 1),
-                decoder_norm_interval=tooluse_config.get("decoder_norm_interval", 10),
-                log_interval=tooluse_config.get("log_interval", 1),
-                output_dir=str(self.output_dir / "stage2"),
-                experiment_name=ckpt_name.replace(".pt", ""),
-                use_swanlab=tooluse_config.get("use_swanlab", False),
-                swanlab_project=tooluse_config.get("swanlab_project", "agent-tool-use"),
-                device=self.device,
-                dtype=self.dtype,
-            )
+        self.sae_trainer = trainer
 
-            trainer = SAETrainer(train_config)
-
-            # 如果有 Stage 1 模型，加载它
-            if sae_model is not None:
-                trainer.model = sae_model
-                trainer.optimizer = torch.optim.AdamW(
-                    trainer.model.parameters(),
-                    lr=train_config.learning_rate,
-                )
-
-            self.sae_trainers[layer] = trainer
-
-            checkpoint_paths[layer] = str(self.output_dir / "stage2" / ckpt_name)
-
-        return checkpoint_paths
+        return {layer: str(self.output_dir / "stage2" / ckpt_name)}
 
     def train_stage2(
         self,
-        stage1_checkpoints: Dict[int, str],
+        stage1_checkpoint: Optional[str],
         tooluse_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[int, str]:
         """兼容旧接口：等价于 init_stage2。"""
-        return self.init_stage2(stage1_checkpoints, tooluse_config)
+        return self.init_stage2(stage1_checkpoint, tooluse_config)
 
     def train_stage2_streaming(
         self,
-        stage1_checkpoints: Dict[int, str],
+        stage1_checkpoint: Optional[str],
         activation_generator: Generator[Dict[int, torch.Tensor], None, None],
         total_steps: Optional[int] = None,
         tooluse_config: Optional[Dict[str, Any]] = None,
@@ -743,20 +720,22 @@ class TwoStageTrainer:
         Returns:
             {layer: checkpoint_path}
         """
-        checkpoint_paths = self.train_stage2(stage1_checkpoints, tooluse_config)
+        checkpoint_paths = self.train_stage2(stage1_checkpoint, tooluse_config)
         tooluse_config = tooluse_config or {}
         target_tokens = tooluse_config.get("target_tokens", 50_000_000)
 
-        for layer in self.layers:
-            trainer = self.sae_trainers[layer]
-            trainer.train_streaming(activation_generator, layer, total_steps)
+        layer = self.layer
+        if self.sae_trainer is None:
+            raise RuntimeError("Stage2 trainer is not initialized")
 
-            # 保存最终检查点
-            dict_size = trainer.config.dict_size
-            ckpt_name = _make_checkpoint_name(
-                self.model_name_or_path, layer, dict_size, target_tokens, "stage2"
-            )
-            trainer.save_checkpoint(ckpt_name)
+        trainer = self.sae_trainer
+        trainer.train_streaming(activation_generator, layer, total_steps)
+
+        dict_size = trainer.config.dict_size
+        ckpt_name = _make_checkpoint_name(
+            self.model_name_or_path, layer, dict_size, target_tokens, "stage2"
+        )
+        trainer.save_checkpoint(ckpt_name)
 
         return checkpoint_paths
 
@@ -769,8 +748,8 @@ def main():
     # ---- Stage 1 ----
     s1 = subparsers.add_parser("stage1", help="Stage 1: 预训练语料训练")
     s1.add_argument("--model", type=str, required=True, help="LLM model name or path")
-    s1.add_argument("--layers", type=int, nargs="+", default=[24, 27],
-                     help="Layers to train SAE on")
+    s1.add_argument("--layer", type=int, default=24,
+                     help="Target layer to train SAE on")
     s1.add_argument("--output-dir", type=str, default="./outputs/sae_checkpoints")
     s1.add_argument("--target-tokens", type=int, default=50_000_000,
                      help="Target number of tokens (50-100M recommended)")
@@ -797,7 +776,8 @@ def main():
     s2.add_argument("--model", type=str, required=True, help="LLM model name or path")
     s2.add_argument("--stage1-dir", type=str, required=True,
                      help="Stage 1 checkpoint directory")
-    s2.add_argument("--layers", type=int, nargs="+", default=[24, 27])
+    s2.add_argument("--layer", type=int, default=24,
+                    help="Target layer to train SAE on")
     s2.add_argument("--output-dir", type=str, default="./outputs/sae_checkpoints")
     s2.add_argument("--target-tokens", type=int, default=50_000_000)
     s2.add_argument("--learning-rate", type=float, default=5e-5,
@@ -819,7 +799,7 @@ def main():
     if args.command == "stage1":
         trainer = TwoStageTrainer(
             model_name_or_path=args.model,
-            layers=args.layers,
+            layer=args.layer,
             output_dir=args.output_dir,
             device=args.device,
             dtype=args.dtype,
@@ -850,18 +830,16 @@ def main():
     elif args.command == "stage2":
         # 查找 Stage 1 检查点
         stage1_dir = Path(args.stage1_dir)
-        stage1_checkpoints: Dict[int, str] = {}
-        for layer in args.layers:
-            # 匹配 *-layer{L}-*-stage1.pt
-            matches = list(stage1_dir.glob(f"*-layer{layer}-*-stage1.pt"))
-            if matches:
-                stage1_checkpoints[layer] = str(matches[0])
-            else:
-                print(f"Warning: Stage 1 checkpoint not found for layer {layer}")
+        stage1_checkpoint: Optional[str] = None
+        matches = list(stage1_dir.glob(f"*-layer{args.layer}-*-stage1.pt"))
+        if matches:
+            stage1_checkpoint = str(matches[0])
+        else:
+            print(f"Warning: Stage 1 checkpoint not found for layer {args.layer}")
 
         trainer = TwoStageTrainer(
             model_name_or_path=args.model,
-            layers=args.layers,
+            layer=args.layer,
             output_dir=args.output_dir,
             device=args.device,
             dtype=args.dtype,
@@ -878,7 +856,7 @@ def main():
             "use_swanlab": args.use_swanlab,
         }
 
-        checkpoints = trainer.init_stage2(stage1_checkpoints, tooluse_config)
+        checkpoints = trainer.init_stage2(stage1_checkpoint, tooluse_config)
 
         print("\nStage 2 initialized! Ready for tool-use data.")
         print("Use the streaming API to provide tool-use activations.")

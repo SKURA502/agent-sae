@@ -7,7 +7,7 @@ set -e
 MODEL_PATH="meta-llama/Llama-3-8B-Instruct"
 OUTPUT_BASE="./outputs"
 DEVICE="cuda"
-LAYERS=(24 27)
+LAYER=24
 NUM_SAMPLES=2000
 TARGET_TOKENS=50000000
 
@@ -22,7 +22,7 @@ python main.py generate-rollouts \
     --model $MODEL_PATH \
     --dataset synthetic \
     --num-samples $NUM_SAMPLES \
-    --hook-layers "${LAYERS[@]}" \
+    --hook-layers $LAYER \
     --output-dir $OUTPUT_BASE/rollouts \
     --device $DEVICE \
     --streaming
@@ -32,7 +32,7 @@ echo ""
 echo "Step 2: Training SAE Stage 1..."
 python -m sae.train_sae stage1 \
     --model $MODEL_PATH \
-    --layers "${LAYERS[@]}" \
+    --layer $LAYER \
     --output-dir $OUTPUT_BASE/sae_checkpoints \
     --target-tokens $TARGET_TOKENS \
     --seq-length 1024 \
@@ -51,7 +51,7 @@ python -m run.cache_activations train \
     --model $MODEL_PATH \
     --dataset synthetic \
     --num-samples $NUM_SAMPLES \
-    --layers "${LAYERS[@]}" \
+    --layer $LAYER \
     --stage1-dir $OUTPUT_BASE/sae_checkpoints/stage1 \
     --output-dir $OUTPUT_BASE/sae_checkpoints \
     --target-tokens $TARGET_TOKENS \
