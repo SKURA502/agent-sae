@@ -544,9 +544,11 @@ class TwoStageTrainer:
             positions_per_seq=positions_per_seq,
         )
 
-        # 计算字典大小
-        dict_size = sae_config.get("dict_size", self.hidden_size * 8)
-        k = sae_config.get("k", self.hidden_size // 32)
+        # 计算字典大小（仅当传入值非 None 时覆盖默认）
+        requested_dict_size = sae_config.get("dict_size")
+        requested_k = sae_config.get("k")
+        dict_size = int(requested_dict_size) if requested_dict_size is not None else self.hidden_size * 8
+        k = int(requested_k) if requested_k is not None else self.hidden_size // 32
         target_tokens = pt_config.target_tokens
 
         print("Stage 1: Training SAE on pretrain corpus")
@@ -639,6 +641,8 @@ class TwoStageTrainer:
 
             # 从 Stage 1 加载检查点
             stage1_path = stage1_checkpoints.get(layer)
+            requested_dict_size = tooluse_config.get("dict_size")
+            requested_k = tooluse_config.get("k")
             if stage1_path and Path(stage1_path).exists():
                 print(f"Loading Stage 1 checkpoint: {stage1_path}")
                 sae_model = TopKSAE.load(stage1_path, device=self.device)
@@ -649,10 +653,24 @@ class TwoStageTrainer:
                 )
                 sae_model = None
 
-            dict_size = (
-                sae_model.config.dict_size if sae_model else self.hidden_size * 8
-            )
-            k_val = sae_model.config.k if sae_model else self.hidden_size // 32
+            if sae_model:
+                dict_size = sae_model.config.dict_size
+                k_val = sae_model.config.k
+                if requested_dict_size is not None and int(requested_dict_size) != int(dict_size):
+                    print(
+                        f"Warning: stage1 checkpoint dict_size={dict_size}，"
+                        f"忽略传入的 --dict-size={requested_dict_size}"
+                    )
+                if requested_k is not None and int(requested_k) != int(k_val):
+                    print(
+                        f"Warning: stage1 checkpoint k={k_val}，"
+                        f"忽略传入的 --k={requested_k}"
+                    )
+            else:
+                dict_size = int(requested_dict_size) if requested_dict_size is not None else self.hidden_size * 8
+                k_val = int(requested_k) if requested_k is not None else self.hidden_size // 32
+
+            print(f"  Dict size: {dict_size}, K: {k_val}")
 
             # 检查点文件名
             ckpt_name = _make_checkpoint_name(
@@ -745,6 +763,10 @@ def main():
     s1.add_argument("--sae-batch-size", type=int, default=4096,
                      help="Batch size for SAE training (number of token activations)")
     s1.add_argument("--learning-rate", type=float, default=1e-5)
+    s1.add_argument("--dict-size", type=int, default=None,
+                     help="SAE dictionary size (default: hidden_size * 8)")
+    s1.add_argument("--k", type=int, default=None,
+                     help="SAE top-k sparsity (default: hidden_size // 32)")
     s1.add_argument("--data-dir", type=str,
                      default=str(_PROJECT_ROOT / "data" / "raw" / "100M"),
                      help="本地 JSONL 数据目录")
@@ -764,6 +786,10 @@ def main():
     s2.add_argument("--target-tokens", type=int, default=50_000_000)
     s2.add_argument("--learning-rate", type=float, default=5e-5,
                      help="Learning rate (usually smaller than stage1)")
+    s2.add_argument("--dict-size", type=int, default=None,
+                     help="SAE dictionary size (only used when no stage1 checkpoint)")
+    s2.add_argument("--k", type=int, default=None,
+                     help="SAE top-k sparsity (only used when no stage1 checkpoint)")
     s2.add_argument("--num-epochs", type=int, default=1)
     s2.add_argument("--batch-size", type=int, default=4096, help="Batch size for SAE training (number of token activations)")
     s2.add_argument("--decoder-norm-interval", type=int, default=10,
@@ -793,6 +819,8 @@ def main():
         sae_config = {
             "batch_size": args.sae_batch_size,
             "learning_rate": args.learning_rate,
+            "dict_size": args.dict_size,
+            "k": args.k,
             "decoder_norm_interval": args.decoder_norm_interval,
             "use_swanlab": args.use_swanlab,
         }
@@ -827,6 +855,8 @@ def main():
             "learning_rate": args.learning_rate,
             "num_epochs": args.num_epochs,
             "batch_size": args.batch_size,
+            "dict_size": args.dict_size,
+            "k": args.k,
             "target_tokens": args.target_tokens,
             "decoder_norm_interval": args.decoder_norm_interval,
             "use_swanlab": args.use_swanlab,
