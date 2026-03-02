@@ -435,6 +435,40 @@ class TwoStageTrainer:
         # SAE 训练器（每层一个）
         self.sae_trainers: Dict[int, SAETrainer] = {}
 
+    def _infer_hidden_size(self) -> int:
+        """推断 LLM 文本 hidden size（优先 text_config，兼容多模态模型）。"""
+        config = getattr(self.model, "config", None)
+
+        if config is not None:
+            text_config = getattr(config, "text_config", None)
+            if text_config is not None and hasattr(text_config, "hidden_size"):
+                return int(text_config.hidden_size)
+
+            for attr in ("hidden_size", "d_model", "n_embd"):
+                if hasattr(config, attr):
+                    value = getattr(config, attr)
+                    if value is not None:
+                        return int(value)
+
+        # 结构兜底：尝试从输入 embedding 读取
+        for emb_path in (
+            "model.embed_tokens",
+            "language_model.model.embed_tokens",
+            "model.language_model.model.embed_tokens",
+            "transformer.wte",
+        ):
+            cur = self.model
+            ok = True
+            for part in emb_path.split("."):
+                if not hasattr(cur, part):
+                    ok = False
+                    break
+                cur = getattr(cur, part)
+            if ok and hasattr(cur, "embedding_dim"):
+                return int(cur.embedding_dim)
+
+        return 4096
+
     def _load_llm(self):
         """加载 LLM 模型"""
         if self.model is not None:
@@ -465,13 +499,8 @@ class TwoStageTrainer:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        # 获取 hidden size
-        if hasattr(self.model.config, "hidden_size"):
-            self.hidden_size = self.model.config.hidden_size
-        elif hasattr(self.model.config, "d_model"):
-            self.hidden_size = self.model.config.d_model
-        else:
-            self.hidden_size = 4096  # 默认值
+        # 获取 hidden size（兼容多模态模型，如 Gemma3）
+        self.hidden_size = self._infer_hidden_size()
 
         print(f"LLM loaded. Hidden size: {self.hidden_size}")
 
@@ -636,7 +665,7 @@ class TwoStageTrainer:
                 k=k_val,
                 learning_rate=tooluse_config.get("learning_rate", 5e-5),
                 batch_size=tooluse_config.get("batch_size", 4096),
-                num_epochs=tooluse_config.get("num_epochs", 10),
+                num_epochs=tooluse_config.get("num_epochs", 1),
                 decoder_norm_interval=tooluse_config.get("decoder_norm_interval", 10),
                 log_interval=tooluse_config.get("log_interval", 1),
                 output_dir=str(self.output_dir / "stage2"),
@@ -715,7 +744,7 @@ def main():
     s1.add_argument("--batch-size", type=int, default=32, help="Batch size for LLM inference forward pass")
     s1.add_argument("--sae-batch-size", type=int, default=4096,
                      help="Batch size for SAE training (number of token activations)")
-    s1.add_argument("--learning-rate", type=float, default=1e-4)
+    s1.add_argument("--learning-rate", type=float, default=1e-5)
     s1.add_argument("--data-dir", type=str,
                      default=str(_PROJECT_ROOT / "data" / "raw" / "100M"),
                      help="本地 JSONL 数据目录")
@@ -735,7 +764,7 @@ def main():
     s2.add_argument("--target-tokens", type=int, default=50_000_000)
     s2.add_argument("--learning-rate", type=float, default=5e-5,
                      help="Learning rate (usually smaller than stage1)")
-    s2.add_argument("--num-epochs", type=int, default=10)
+    s2.add_argument("--num-epochs", type=int, default=1)
     s2.add_argument("--batch-size", type=int, default=4096, help="Batch size for SAE training (number of token activations)")
     s2.add_argument("--decoder-norm-interval", type=int, default=10,
                      help="每 N 步进行一次 decoder unit norm")

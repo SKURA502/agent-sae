@@ -61,6 +61,90 @@ class ActivationStreamer:
         # 激活缓存
         self._activations = {}
         self._hooks = []
+        self._layer_container = None
+
+    @staticmethod
+    def _get_attr_by_path(obj, path: str):
+        """按属性路径获取对象，例如 "model.layers"。"""
+        cur = obj
+        for attr in path.split("."):
+            if not hasattr(cur, attr):
+                return None
+            cur = getattr(cur, attr)
+        return cur
+
+    def _get_expected_num_layers(self) -> Optional[int]:
+        """从 config 中读取预期层数（优先 text_config）。"""
+        config = getattr(self.model, "config", None)
+        if config is None:
+            return None
+
+        text_config = getattr(config, "text_config", None)
+        if text_config is not None and hasattr(text_config, "num_hidden_layers"):
+            return int(text_config.num_hidden_layers)
+
+        if hasattr(config, "num_hidden_layers"):
+            return int(config.num_hidden_layers)
+
+        return None
+
+    def _resolve_layer_container(self):
+        """解析模型中的 transformer block 容器（list / ModuleList）。"""
+        if self._layer_container is not None:
+            return self._layer_container
+
+        expected_layers = self._get_expected_num_layers()
+
+        # 常见 HuggingFace / 多模态 / 包装模型路径
+        candidate_paths = [
+            "model.layers",
+            "model.model.layers",
+            "transformer.h",
+            "gpt_neox.layers",
+            "language_model.model.layers",
+            "language_model.layers",
+            "text_model.model.layers",
+            "text_model.layers",
+            "model.language_model.model.layers",
+            "model.language_model.layers",
+            "base_model.model.model.layers",
+            "base_model.model.layers",
+        ]
+
+        valid_candidates = []
+        for path in candidate_paths:
+            container = self._get_attr_by_path(self.model, path)
+            if isinstance(container, (list, torch.nn.ModuleList)) and len(container) > 0:
+                score = 0
+                if expected_layers is not None and len(container) == expected_layers:
+                    score += 10
+                # 优先更短路径（通常更直接）
+                score -= path.count(".")
+                valid_candidates.append((score, path, container))
+
+        if not valid_candidates:
+            # 兜底：在命名模块中搜索长度匹配的 ModuleList
+            for name, module in self.model.named_modules():
+                if isinstance(module, torch.nn.ModuleList) and len(module) > 0:
+                    score = 0
+                    if expected_layers is not None and len(module) == expected_layers:
+                        score += 10
+                    valid_candidates.append((score, name, module))
+
+        if not valid_candidates:
+            config = getattr(self.model, "config", None)
+            arch = None
+            if config is not None:
+                arch = getattr(config, "architectures", None)
+            raise AttributeError(
+                f"无法找到模型的 layer 结构。architectures={arch}, expected_layers={expected_layers}"
+            )
+
+        valid_candidates.sort(key=lambda item: item[0], reverse=True)
+        _, best_name, best_container = valid_candidates[0]
+        self._layer_container = best_container
+        print(f"检测到层容器: {best_name} (num_layers={len(best_container)})")
+        return self._layer_container
         
     def _create_hook(self, layer_idx: int):
         """创建 hook 函数"""
@@ -76,17 +160,11 @@ class ActivationStreamer:
     def _register_hooks(self):
         """注册 hooks"""
         self._remove_hooks()
+        layers = self._resolve_layer_container()
         
         for layer_idx in self.layers:
             try:
-                # 尝试不同的模型结构
-                if hasattr(self.model, 'model') and hasattr(self.model.model, 'layers'):
-                    layer = self.model.model.layers[layer_idx]
-                elif hasattr(self.model, 'transformer') and hasattr(self.model.transformer, 'h'):
-                    layer = self.model.transformer.h[layer_idx]
-                else:
-                    raise AttributeError(f"无法找到模型的 layer 结构")
-                    
+                layer = layers[layer_idx]
                 hook = layer.register_forward_hook(self._create_hook(layer_idx))
                 self._hooks.append(hook)
             except (AttributeError, IndexError) as e:
