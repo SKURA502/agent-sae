@@ -18,7 +18,7 @@ class SAEConfig:
     dict_size: int = 32768
     k: int = 128
     device: str = "cuda"
-    dtype: str = "float32"
+    dtype: str = "bfloat16"
     
     def get_torch_dtype(self) -> torch.dtype:
         dtype_map = {
@@ -169,6 +169,7 @@ class TopKSAE(nn.Module):
         
         model = cls(config)
         model.load_state_dict(checkpoint["state_dict"])
+        model.to(config.get_torch_dtype())
         
         return model
 

@@ -79,7 +79,7 @@ class _PendingBuffer:
         batch = self.buf[:batch_size].clone()
         remaining = self.size - batch_size
         if remaining > 0:
-            self.buf[:remaining] = self.buf[batch_size:self.size]
+            self.buf[:remaining] = self.buf[batch_size:self.size].clone()
         self.size = remaining
         return batch
 
