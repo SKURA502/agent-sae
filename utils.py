@@ -13,8 +13,8 @@ def add_common_args(parser: argparse.ArgumentParser):
 
 def add_sae_args(parser: argparse.ArgumentParser):
     """添加 SAE 训练相关 CLI 参数"""
-    parser.add_argument("--learning-rate", type=float, default=1e-5)
-    parser.add_argument("--batch-size", type=int, default=4096, help="SAE training batch size")
+    parser.add_argument("--learning-rate", type=float, default=5e-4)
+    parser.add_argument("--batch-size", type=int, default=8192, help="SAE training batch size")
     parser.add_argument("--buffer-size", type=int, default=None,
                         help="Streaming activation buffer size (default: same as --batch-size)")
     parser.add_argument("--drop-last", action="store_true",
@@ -31,7 +31,7 @@ def add_stage_args(parser: argparse.ArgumentParser):
     """stage1 / stage2 共享参数。"""
     add_common_args(parser)
     add_sae_args(parser)
-    parser.add_argument("--layer", type=int, default=24, help="Target layer of the LLM to attach SAE(starting from 0)")
+    parser.add_argument("--layer", type=int, default=23, help="Target layer of the LLM to attach SAE(starting from 0)")
     parser.add_argument("--output-dir", type=str,
                         default="./outputs/sae_checkpoints")
 

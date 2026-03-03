@@ -7,7 +7,7 @@ set -e
 MODEL_PATH="meta-llama/Llama-3-8B-Instruct"
 OUTPUT_BASE="./outputs"
 DEVICE="cuda"
-LAYER=24
+LAYER=23
 NUM_SAMPLES=2000
 TARGET_TOKENS=50000000
 
@@ -37,11 +37,12 @@ python -m sae.train_sae stage1 \
     --target-tokens $TARGET_TOKENS \
     --seq-length 1024 \
     --inference-batch-size 32 \
-    --batch-size 4096 \
-    --learning-rate 1e-4 \
+    --batch-size 16384 \
+    --learning-rate 5e-4 \
     --data-dir ./data/raw/pretrain \
     --device $DEVICE \
-    --dtype float32
+    --dtype bfloat16 \
+    --use-swanlab
 
 # Step 3: Stage 2 流式训练（复用 Stage 1 检查点）
 echo ""
@@ -55,10 +56,11 @@ python -m run.cache_activations \
     --output-dir $OUTPUT_BASE/sae_checkpoints \
     --target-tokens $TARGET_TOKENS \
     --buffer-size 8192 \
-    --batch-size 4096 \
-    --learning-rate 5e-5 \
+    --batch-size 16384 \
+    --learning-rate 5e-4 \
     --device $DEVICE \
-    --dtype float32
+    --dtype bfloat16 \
+    --use-swanlab
 
 echo ""
 echo "Step 4: Locating Stage 2 checkpoints..."
