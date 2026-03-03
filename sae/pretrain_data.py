@@ -230,6 +230,11 @@ def create_pretrain_data_iterator(
     batch_size: int = 16, buffer_size: int = 8192, device: str = "cuda",
 ) -> Generator[Dict[int, torch.Tensor], None, None]:
     """组合数据加载 + 激活提取 + 缓冲 → yields {layer: [buffer_size, hidden]}"""
+    if buffer_size is None:
+        buffer_size = 8192
+    if buffer_size <= 0:
+        raise ValueError(f"buffer_size 必须为正整数，当前为: {buffer_size}")
+
     dataset = LocalJsonlDataset(data_dir=config.data_dir, seed=config.seed)
     streamer = ActivationStreamer(model, tokenizer, layers, device)
     buffer = ActivationBuffer(buffer_size, layers)

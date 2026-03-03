@@ -48,8 +48,10 @@ class TrainingConfig:
     batch_size: int = 4096
     num_epochs: int = 1
     warmup_ratio: float = 0.1
+    stable_ratio: float = 0.8
     decoder_norm_interval: int = 10
     log_interval: int = 10
+    drop_last: bool = False
     output_dir: str = "./outputs/sae_checkpoints"
     experiment_name: str = "sae_training"
     use_swanlab: bool = False
@@ -120,8 +122,7 @@ class SAETrainer:
             shuffle=False, num_workers=0, pin_memory=True,
         )
         total_steps = len(loader) * self.config.num_epochs
-        warmup = int(total_steps * self.config.warmup_ratio)
-        scheduler = self._make_scheduler(total_steps, warmup)
+        scheduler = self._make_scheduler(total_steps)
 
         stats: Dict[str, list] = {"train_losses": []}
         try:
@@ -155,13 +156,27 @@ class SAETrainer:
               f"dict_size={self.config.dict_size}, k={self.config.k}")
 
         total_steps = total_steps or 10000
-        warmup = int(total_steps * self.config.warmup_ratio)
-        scheduler = self._make_scheduler(total_steps, warmup)
+        scheduler = self._make_scheduler(total_steps)
 
         stats: Dict[str, list] = {"interval_avg_losses": [], "steps": []}
         self.model.train()
         running, n = 0.0, 0
         pbar = tqdm(total=total_steps, desc="Streaming training")
+        pending: Optional[torch.Tensor] = None
+
+        def _run_step(batch: torch.Tensor):
+            nonlocal running, n
+            m = self.train_batch(batch, scheduler)
+            running += m["loss"]
+            n += 1
+            pbar.update(1)
+            pbar.set_postfix(loss=f"{m['loss']:.4f}")
+            if self.global_step % self.config.log_interval == 0 and n > 0:
+                avg = running / n
+                stats["interval_avg_losses"].append(avg)
+                stats["steps"].append(self.global_step)
+                self._log_metrics(avg, m)
+                running, n = 0.0, 0
 
         try:
             for activations in activation_generator:
@@ -171,22 +186,17 @@ class SAETrainer:
                 if data.dim() == 3:
                     data = data.view(-1, data.shape[-1])
 
-                for i in range(0, len(data), self.config.batch_size):
-                    m = self.train_batch(
-                        data[i:i + self.config.batch_size], scheduler,
-                    )
-                    running += m["loss"]
-                    n += 1
-                    pbar.update(1)
-                    pbar.set_postfix(loss=f"{m['loss']:.4f}")
+                if pending is None:
+                    pending = data
+                else:
+                    pending = torch.cat((pending, data), dim=0)
 
-                    if (self.global_step % self.config.log_interval == 0
-                            and n > 0):
-                        avg = running / n
-                        stats["interval_avg_losses"].append(avg)
-                        stats["steps"].append(self.global_step)
-                        self._log_metrics(avg, m)
-                        running, n = 0.0, 0
+                while pending is not None and len(pending) >= self.config.batch_size:
+                    _run_step(pending[:self.config.batch_size])
+                    pending = pending[self.config.batch_size:]
+
+            if pending is not None and len(pending) > 0 and not self.config.drop_last:
+                _run_step(pending)
 
             self._save_stats(stats)
             return stats
@@ -208,13 +218,20 @@ class SAETrainer:
         print(f"Loaded checkpoint from {checkpoint_path}")
 
     # Internal helpers
-    def _make_scheduler(self, total: int, warmup: int):
+    def _make_scheduler(self, total: int):
         from torch.optim.lr_scheduler import LambdaLR
 
+        total = max(int(total), 1)
+        warmup_steps = int(total * self.config.warmup_ratio)
+        stable_steps = int(total * self.config.stable_ratio)
+        decay_start = min(warmup_steps + stable_steps, total)
+
         def lr_lambda(step: int) -> float:
-            if step < warmup:
-                return step / max(1, warmup)
-            return max(0.0, (total - step) / max(1, total - warmup))
+            if step < warmup_steps:
+                return step / max(1, warmup_steps)
+            if step < decay_start:
+                return 1.0
+            return max(0.0, (total - step) / max(1, total - decay_start))
 
         return LambdaLR(self.optimizer, lr_lambda)
 
@@ -346,6 +363,7 @@ class TwoStageTrainer:
             num_epochs=cfg.get("num_epochs", 1),
             decoder_norm_interval=cfg.get("decoder_norm_interval", 10),
             log_interval=cfg.get("log_interval", 1),
+            drop_last=cfg.get("drop_last", False),
             output_dir=str(self.output_dir / stage),
             experiment_name=ckpt_name.replace(".pt", ""),
             use_swanlab=cfg.get("use_swanlab", False),
@@ -397,10 +415,14 @@ class TwoStageTrainer:
                else target_tokens // seq_length * positions_per_seq)
         total_steps = max(est // tc.batch_size, 1)
 
+        buffer_size = sc.get("buffer_size")
+        if buffer_size is None:
+            buffer_size = tc.batch_size
+
         gen = create_pretrain_data_iterator(
             model=self.model, tokenizer=self.tokenizer, config=pt_cfg,
             layers=[layer], batch_size=pc.get("batch_size", 32),
-            buffer_size=sc.get("buffer_size", 8192), device=self.device,
+            buffer_size=buffer_size, device=self.device,
         )
         trainer.train_streaming(gen, layer, total_steps)
         trainer.save_checkpoint(ckpt_name)
@@ -518,6 +540,8 @@ def main():
                 "learning_rate": args.learning_rate,
                 "dict_size": args.dict_size,
                 "k": args.k,
+                "buffer_size": args.buffer_size,
+                "drop_last": args.drop_last,
                 "use_swanlab": args.use_swanlab,
             },
         )
@@ -543,6 +567,7 @@ def main():
             "dict_size": args.dict_size,
             "k": args.k,
             "target_tokens": args.target_tokens,
+            "drop_last": args.drop_last,
             "use_swanlab": args.use_swanlab,
         })
         print("\nStage 2 initialized! Use streaming API for tool-use data.")

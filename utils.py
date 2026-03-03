@@ -15,6 +15,10 @@ def add_sae_args(parser: argparse.ArgumentParser):
     """添加 SAE 训练相关 CLI 参数"""
     parser.add_argument("--learning-rate", type=float, default=1e-5)
     parser.add_argument("--batch-size", type=int, default=4096, help="SAE training batch size")
+    parser.add_argument("--buffer-size", type=int, default=None,
+                        help="Streaming activation buffer size (default: same as --batch-size)")
+    parser.add_argument("--drop-last", action="store_true",
+                        help="Drop final incomplete SAE batch in streaming training")
     parser.add_argument("--dict-size", type=int, default=None,
                         help="SAE dictionary size (default: hidden_size * 8)")
     parser.add_argument("--k", type=int, default=None,

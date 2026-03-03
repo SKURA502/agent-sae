@@ -37,20 +37,14 @@ class TopKSAE(nn.Module):
         super().__init__()
         self.config = config
         
-        self.encoder = nn.Linear(config.input_dim, config.dict_size, bias=False)
         self.decoder = nn.Linear(config.dict_size, config.input_dim, bias=False)
-
+        self._normalize_decoder() 
+        self.encoder = nn.Linear(config.input_dim, config.dict_size, bias=False)
+        self.encoder.weight.data = self.decoder.weight.data.t()  
         self.pre_bias = nn.Parameter(torch.zeros(config.input_dim))
-        
-        self._init_weights()
-        
+
         self.to(config.device)
         self.to(config.get_torch_dtype())
-    
-    def _init_weights(self):
-        """初始化权重"""
-        with torch.no_grad():
-            self.decoder.weight.data = self.encoder.weight.data.T.clone()
     
     def _normalize_decoder(self):
         """归一化 decoder 权重（每列归一化）"""
@@ -151,13 +145,13 @@ class TopKSAE(nn.Module):
             feature_idx: 要 steering 的特征索引
             strength: 目标特征缩放系数（1.0 不变，>1 增强，0 抑制）
         Returns:
-            steered: [batch, input_dim] 在 latent 调整后重建得到的激活
+            steered_x: [batch, input_dim] 在 latent 调整后重建得到的激活
         """
         with torch.no_grad():
             latents = self.encode(x)
             latents[:, feature_idx] = latents[:, feature_idx] * strength
-            steered = self.decode(latents)
-        return steered
+            steered_x = self.decode(latents)
+        return steered_x
     
     def save(self, path: str):
         """保存模型"""
