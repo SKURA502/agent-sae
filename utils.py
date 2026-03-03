@@ -8,7 +8,7 @@ def add_common_args(parser: argparse.ArgumentParser):
     """添加通用 CLI 参数：--model, --device, --dtype"""
     parser.add_argument("--model", type=str, required=True, help="LLM model name or path")
     parser.add_argument("--device", type=str, default="cuda")
-    parser.add_argument("--dtype", type=str, default="float32")
+    parser.add_argument("--dtype", type=str, default="bfloat16")
 
 
 def add_sae_args(parser: argparse.ArgumentParser):
