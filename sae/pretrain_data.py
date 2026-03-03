@@ -42,7 +42,7 @@ class ActivationStreamer:
     def _resolve_layer_container(self):
         if self._layer_container is not None:
             return self._layer_container
-        for path in ("model.layers", "model.model.layers", "transformer.h"):
+        for path in ("model.layers", "language_model.model.layers"):
             c = self._get_attr_by_path(self.model, path)
             if isinstance(c, (list, torch.nn.ModuleList)) and len(c) > 0:
                 self._layer_container = c

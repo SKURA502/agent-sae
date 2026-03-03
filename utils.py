@@ -27,6 +27,15 @@ def add_sae_args(parser: argparse.ArgumentParser):
     parser.add_argument("--use-swanlab", action="store_true", help="Use SwanLab for logging")
 
 
+def add_stage_args(parser: argparse.ArgumentParser):
+    """stage1 / stage2 共享参数。"""
+    add_common_args(parser)
+    add_sae_args(parser)
+    parser.add_argument("--layer", type=int, default=24, help="Target layer of the LLM to attach SAE(starting from 0)")
+    parser.add_argument("--output-dir", type=str,
+                        default="./outputs/sae_checkpoints")
+
+
 def add_dataset_args(parser: argparse.ArgumentParser):
     """添加数据集相关 CLI 参数"""
     parser.add_argument("--dataset", type=str, default="synthetic",

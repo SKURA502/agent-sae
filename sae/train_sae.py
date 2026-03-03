@@ -560,23 +560,14 @@ class TwoStageTrainer:
         return paths
 
 
-def _add_stage_args(parser: argparse.ArgumentParser):
-    """stage1 / stage2 共享参数。"""
-    from utils import add_common_args, add_sae_args
-    add_common_args(parser)
-    add_sae_args(parser)
-    parser.add_argument("--layer", type=int, default=24)
-    parser.add_argument("--output-dir", type=str,
-                        default="./outputs/sae_checkpoints")
-
-
 def main():
     """命令行入口"""
     parser = argparse.ArgumentParser(description="Train SAE (Two-Stage)")
     sub = parser.add_subparsers(dest="command")
+    from utils import add_stage_args
 
     s1 = sub.add_parser("stage1", help="Stage 1: pretrain corpus")
-    _add_stage_args(s1)
+    add_stage_args(s1)
     s1.add_argument("--seq-length", type=int, default=1024)
     s1.add_argument("--inference-batch-size", type=int, default=64,
                     help="LLM inference batch size")
@@ -584,7 +575,7 @@ def main():
                     default=str(_PROJECT_ROOT / "data" / "raw" / "pretrain"))
 
     s2 = sub.add_parser("stage2", help="Stage 2: tool-use data")
-    _add_stage_args(s2)
+    add_stage_args(s2)
     s2.add_argument("--stage1-dir", type=str, required=True,
                     help="Stage 1 checkpoint directory")
 

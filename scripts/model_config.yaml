@@ -11,8 +11,8 @@ models:
     local_path: "/data/models/Llama-3.1-8B-Instruct"
     hidden_size: 4096
     num_layers: 32
-    # Hook 层位置（3/4位置）
-    hook_layer: 24
+    # Hook 层位置（3/4位置, Layer 0为第一层）
+    hook_layer: 23
     # 残差流 hook 点名称
     hook_point: "model.layers.{layer}.post_attention_layernorm"
     # 是否为 tool-tuned 模型
@@ -23,7 +23,7 @@ models:
     local_path: "/data/models/Qwen3-4B"
     hidden_size: 2560
     num_layers: 36
-    hook_layer: 27
+    hook_layer: 26
     hook_point: "model.layers.{layer}.post_attention_layernorm"
     is_tool_tuned: true
 
@@ -32,7 +32,7 @@ models:
     local_path: "/data/models/Qwen3-8B"
     hidden_size: 4096
     num_layers: 36
-    hook_layer: 27
+    hook_layer: 26
     hook_point: "model.layers.{layer}.post_attention_layernorm"
     is_tool_tuned: true
     
@@ -41,7 +41,7 @@ models:
     local_path: "/data/models/Qwen3-14b"
     hidden_size: 5120
     num_layers: 40
-    hook_layer: 30
+    hook_layer: 29
     hook_point: "model.layers.{layer}.post_attention_layernorm"
     is_tool_tuned: true
     
@@ -50,8 +50,8 @@ models:
     local_path: "/data/models/gemma-3-4b-it"
     hidden_size: 2560
     num_layers: 34
-    hook_layer: 25
-    hook_point: "model.layers.{layer}.post_attention_layernorm"
+    hook_layer: 24
+    hook_point: "language_model.model.layers.{layer}.post_attention_layernorm"
     is_tool_tuned: true
     
   gemma3-12b:
@@ -59,13 +59,13 @@ models:
     local_path: "/data/models/gemma-3-12b-it"
     hidden_size: 4096
     num_layers: 48
-    hook_layer: 36
-    hook_point: "model.layers.{layer}.post_attention_layernorm"
+    hook_layer: 35
+    hook_point: "language_model.model.layers.{layer}.post_attention_layernorm"
     is_tool_tuned: true
 
 # 推理配置
 inference:
-  max_new_tokens: 512
+  max_new_tokens: 1024
   temperature: 0.0
   top_p: 1.0
   do_sample: false
