@@ -57,19 +57,21 @@ def _prefetch_generator(gen, maxsize=2):
 class _PendingBuffer:
     """预分配的激活缓冲区，避免反复 torch.cat / slice。"""
 
-    def __init__(self, hidden_dim: int, device: str, initial_capacity: int = 16384):
-        self.buf = torch.empty(initial_capacity, hidden_dim, device=device)
+    def __init__(self, hidden_dim: int, device: str, dtype: torch.dtype = torch.bfloat16,
+                 initial_capacity: int = 16384):
+        self.buf = torch.empty(initial_capacity, hidden_dim, device=device, dtype=dtype)
         self.size = 0
         self.hidden_dim = hidden_dim
         self.device = device
+        self.dtype = dtype
 
     def append(self, data: torch.Tensor):
-        data = data.to(self.device)
+        data = data.to(device=self.device, dtype=self.dtype)
         n = data.shape[0]
         needed = self.size + n
         if needed > self.buf.shape[0]:
             new_cap = max(needed * 2, self.buf.shape[0] * 2)
-            new_buf = torch.empty(new_cap, self.hidden_dim, device=self.device)
+            new_buf = torch.empty(new_cap, self.hidden_dim, device=self.device, dtype=self.dtype)
             new_buf[:self.size] = self.buf[:self.size]
             self.buf = new_buf
         self.buf[self.size:self.size + n] = data
@@ -226,8 +228,10 @@ class SAETrainer:
         self.model.train()
         running, n = 0.0, 0
         pbar = tqdm(total=total_steps, desc="Streaming training")
+        model_dtype = next(self.model.parameters()).dtype
         pending = _PendingBuffer(
             self.config.input_dim, self.config.device,
+            dtype=model_dtype,
             initial_capacity=self.config.batch_size * 4,
         )
 
