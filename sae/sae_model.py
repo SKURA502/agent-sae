@@ -100,10 +100,7 @@ class TopKSAE(nn.Module):
             (loss, loss_dict)
         """
         x_hat, latent = self.forward(x)
-        # 损失计算提升到 float32，避免 bfloat16 精度不足
-        x_f = x.float()
-        x_hat_f = x_hat.float()
-        loss = (((x_hat_f - x_f) ** 2).mean(dim=-1) / (x_f**2).mean(dim=-1)).mean()
+        loss = (((x_hat - x) ** 2).mean(dim=-1) / (x**2).mean(dim=-1)).mean()
         loss_dict = {
             "mean_activation": latent[latent > 0].mean().item() if (latent > 0).any() else 0,
         }
