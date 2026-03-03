@@ -26,7 +26,7 @@ class SAEConfig:
             "float16": torch.float16,
             "bfloat16": torch.bfloat16,
         }
-        return dtype_map.get(self.dtype, torch.float32)
+        return dtype_map.get(self.dtype, torch.bfloat16)       
 
 
 class TopKSAE(nn.Module):
