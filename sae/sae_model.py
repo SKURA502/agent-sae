@@ -163,7 +163,7 @@ class TopKSAE(nn.Module):
     @classmethod
     def load(cls, path: str, device: str = "cuda") -> "TopKSAE":
         """加载模型"""
-        checkpoint = torch.load(path, map_location=device)
+        checkpoint = torch.load(path, map_location=device, weights_only=False)
         config = checkpoint["config"]
         config.device = device
         

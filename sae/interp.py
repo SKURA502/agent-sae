@@ -111,7 +111,7 @@ class ContextCollector:
     def collect(self, texts: Iterator[str], output_path: str = "contexts.json",
                 threshold: float = 10.0, max_length: int = 64,
                 max_per_token: int = 3, min_contexts: int = 5,
-                max_token_classes: int = 32, max_seq_length: int = 512,
+                max_token_classes: int = 0, max_seq_length: int = 512,
                 batch_size: int = 4) -> Tuple[int, str]:
         """收集特征激活上下文 → JSON"""
         self._register_hook()
@@ -131,14 +131,17 @@ class ContextCollector:
             n += len(buf)
 
         self._remove_hook()
-        logger.info(f"共处理 {n} 条文本")
+        logger.info(f"共处理 {n} 条文本, 原始特征数: {len(ctx_map)}")
 
         # 过滤 & 排序
         filtered = {}
+        skip_classes, skip_contexts = 0, 0
         for dim, td in ctx_map.items():
-            if len(td) > max_token_classes:
+            if max_token_classes > 0 and len(td) > max_token_classes:
+                skip_classes += 1
                 continue
             if sum(len(h) for h in td.values()) < min_contexts:
+                skip_contexts += 1
                 continue
             filtered[dim] = {
                 tc: [{"context": c, "activation": round(a, 4)}
@@ -146,6 +149,7 @@ class ContextCollector:
                 for tc, heap in sorted(td.items())
             }
         filtered = dict(sorted(filtered.items()))
+        logger.info(f"过滤: token类别过多={skip_classes}, 上下文不足={skip_contexts}, 保留={len(filtered)}")
 
         out = {"total_features": len(filtered), "threshold": threshold,
                "n_texts": n, "latent_context_map": {str(k): v for k, v in filtered.items()}}
