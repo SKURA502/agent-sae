@@ -6,11 +6,13 @@ SAE Module - Sparse Autoencoder 训练和分析
 - 两阶段 SAE 训练（预训练语料 + Tool-use）
 - 特征提取和分析
 - 流式激活处理（不保存 hidden states 到磁盘）
+- 特征解释（上下文收集 + LLM API 解释）
 """
 
 from .sae_model import TopKSAE, SAEConfig
 from .train_sae import SAETrainer, TrainingConfig, TwoStageTrainer
 from .feature_extraction import FeatureExtractor
+from .interp import ContextCollector, FeatureInterpreter
 from .pretrain_data import (
     PretrainConfig,
     ActivationStreamer,
@@ -29,6 +31,9 @@ __all__ = [
     "TwoStageTrainer",
     # 特征提取
     "FeatureExtractor",
+    # 特征解释
+    "ContextCollector",
+    "FeatureInterpreter",
     # 预训练数据
     "PretrainConfig",
     "ActivationStreamer",
