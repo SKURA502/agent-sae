@@ -177,8 +177,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--stop-idle-seconds",
         type=int,
-        default=60,
-        help="Auto-stop only when backup.swanlab has also been idle for at least this many seconds (default: 60)",
+        default=300,
+        help="Auto-stop only when backup.swanlab has also been idle for at least this many seconds (default: 300)",
     )
     return parser.parse_args()
 
