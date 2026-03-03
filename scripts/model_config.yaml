@@ -14,7 +14,7 @@ models:
     # Hook 层位置（3/4位置, Layer 0为第一层）
     hook_layer: 23
     # 残差流 hook 点名称
-    hook_point: "model.layers.{layer}.post_attention_layernorm"
+    hook_point: "model.layers.{layer}.mlp.down_proj"
     # 是否为 tool-tuned 模型
     is_tool_tuned: true
   
@@ -24,7 +24,7 @@ models:
     hidden_size: 2560
     num_layers: 36
     hook_layer: 26
-    hook_point: "model.layers.{layer}.post_attention_layernorm"
+    hook_point: "model.layers.{layer}.mlp.down_proj"
     is_tool_tuned: true
 
   qwen3-8b:
@@ -33,7 +33,7 @@ models:
     hidden_size: 4096
     num_layers: 36
     hook_layer: 26
-    hook_point: "model.layers.{layer}.post_attention_layernorm"
+    hook_point: "model.layers.{layer}.mlp.down_proj"
     is_tool_tuned: true
     
   qwen3-14b:
@@ -42,7 +42,7 @@ models:
     hidden_size: 5120
     num_layers: 40
     hook_layer: 29
-    hook_point: "model.layers.{layer}.post_attention_layernorm"
+    hook_point: "model.layers.{layer}.mlp.down_proj"
     is_tool_tuned: true
     
   gemma3-4b:
@@ -51,7 +51,7 @@ models:
     hidden_size: 2560
     num_layers: 34
     hook_layer: 24
-    hook_point: "language_model.model.layers.{layer}.post_attention_layernorm"
+    hook_point: "language_model.model.layers.{layer}.post_feedforward_layernorm"
     is_tool_tuned: true
     
   gemma3-12b:
@@ -60,7 +60,7 @@ models:
     hidden_size: 4096
     num_layers: 48
     hook_layer: 35
-    hook_point: "language_model.model.layers.{layer}.post_attention_layernorm"
+    hook_point: "language_model.model.layers.{layer}.post_feedforward_layernorm"
     is_tool_tuned: true
 
 # 推理配置
