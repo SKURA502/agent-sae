@@ -9,6 +9,8 @@ Stage 2: Tool-use 任务激活
 
 import argparse
 import json
+import queue
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Generator, Optional
@@ -26,6 +28,68 @@ except ImportError:
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 from .sae_model import TopKSAE, SAEConfig
+
+
+# ---------- 流式训练辅助工具 ----------
+
+def _prefetch_generator(gen, maxsize=2):
+    """后台线程预取生成器数据，实现推理/训练并行。"""
+    q = queue.Queue(maxsize=maxsize)
+    sentinel = object()
+
+    def _worker():
+        try:
+            for item in gen:
+                q.put(item)
+        finally:
+            q.put(sentinel)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    while True:
+        item = q.get()
+        if item is sentinel:
+            break
+        yield item
+    t.join()
+
+
+class _PendingBuffer:
+    """预分配的激活缓冲区，避免反复 torch.cat / slice。"""
+
+    def __init__(self, hidden_dim: int, device: str, initial_capacity: int = 16384):
+        self.buf = torch.empty(initial_capacity, hidden_dim, device=device)
+        self.size = 0
+        self.hidden_dim = hidden_dim
+        self.device = device
+
+    def append(self, data: torch.Tensor):
+        data = data.to(self.device)
+        n = data.shape[0]
+        needed = self.size + n
+        if needed > self.buf.shape[0]:
+            new_cap = max(needed * 2, self.buf.shape[0] * 2)
+            new_buf = torch.empty(new_cap, self.hidden_dim, device=self.device)
+            new_buf[:self.size] = self.buf[:self.size]
+            self.buf = new_buf
+        self.buf[self.size:self.size + n] = data
+        self.size += n
+
+    def pop_batch(self, batch_size: int) -> torch.Tensor:
+        batch = self.buf[:batch_size].clone()
+        remaining = self.size - batch_size
+        if remaining > 0:
+            self.buf[:remaining] = self.buf[batch_size:self.size]
+        self.size = remaining
+        return batch
+
+    def pop_all(self) -> torch.Tensor:
+        data = self.buf[:self.size].clone()
+        self.size = 0
+        return data
+
+    def __len__(self) -> int:
+        return self.size
 
 
 def _make_checkpoint_name(
@@ -57,7 +121,7 @@ class TrainingConfig:
     use_swanlab: bool = False
     swanlab_project: str = "agent-tool-use"
     device: str = "cuda"
-    dtype: str = "float32"
+    dtype: str = "bfloat16"
 
     def to_sae_config(self) -> SAEConfig:
         return SAEConfig(
@@ -151,7 +215,7 @@ class SAETrainer:
         layer: int,
         total_steps: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """流式训练：从激活生成器逐批读取并训练。"""
+        """流式训练：从激活生成器逐批读取并训练（prefetch + 预分配缓冲）。"""
         print(f"Streaming training for layer {layer}, "
               f"dict_size={self.config.dict_size}, k={self.config.k}")
 
@@ -162,7 +226,10 @@ class SAETrainer:
         self.model.train()
         running, n = 0.0, 0
         pbar = tqdm(total=total_steps, desc="Streaming training")
-        pending: Optional[torch.Tensor] = None
+        pending = _PendingBuffer(
+            self.config.input_dim, self.config.device,
+            initial_capacity=self.config.batch_size * 4,
+        )
 
         def _run_step(batch: torch.Tensor):
             nonlocal running, n
@@ -179,24 +246,20 @@ class SAETrainer:
                 running, n = 0.0, 0
 
         try:
-            for activations in activation_generator:
+            for activations in _prefetch_generator(activation_generator):
                 if layer not in activations:
                     continue
                 data = activations[layer]
                 if data.dim() == 3:
                     data = data.view(-1, data.shape[-1])
 
-                if pending is None:
-                    pending = data
-                else:
-                    pending = torch.cat((pending, data), dim=0)
+                pending.append(data)
 
-                while pending is not None and len(pending) >= self.config.batch_size:
-                    _run_step(pending[:self.config.batch_size])
-                    pending = pending[self.config.batch_size:]
+                while len(pending) >= self.config.batch_size:
+                    _run_step(pending.pop_batch(self.config.batch_size))
 
-            if pending is not None and len(pending) > 0 and not self.config.drop_last:
-                _run_step(pending)
+            if len(pending) > 0 and not self.config.drop_last:
+                _run_step(pending.pop_all())
 
             self._save_stats(stats)
             return stats
@@ -288,7 +351,7 @@ class TwoStageTrainer:
     def __init__(
         self, model_name_or_path: str, layer: int,
         output_dir: str = "./outputs/sae_checkpoints",
-        device: str = "cuda", dtype: str = "float32",
+        device: str = "cuda", dtype: str = "bfloat16",
     ):
         self.model_name_or_path = model_name_or_path
         self.layer = int(layer)

@@ -71,6 +71,13 @@ class ActivationStreamer:
             h.remove()
         self._hooks, self._activations = [], {}
 
+    def cleanup(self):
+        """移除所有 hooks，释放资源。"""
+        self._remove_hooks()
+
+    def __del__(self):
+        self._remove_hooks()
+
     # ---------- 激活提取 ----------
     @torch.no_grad()
     def extract_activations(
@@ -78,15 +85,13 @@ class ActivationStreamer:
     ) -> Dict[int, torch.Tensor]:
         """提取指定位置的激活 → {layer: [batch, positions, hidden]}"""
         self._activations = {}
-        self._register_hooks()
-        try:
-            self.model(input_ids.to(self.device))
-            return {
-                idx: (acts[:, positions, :].cpu() if positions else acts.cpu())
-                for idx, acts in self._activations.items()
-            }
-        finally:
-            self._remove_hooks()
+        if not self._hooks:
+            self._register_hooks()
+        self.model(input_ids.to(self.device))
+        return {
+            idx: (acts[:, positions, :] if positions else acts)
+            for idx, acts in self._activations.items()
+        }
 
     # ---------- 流式提取 ----------
     def _process_batch(self, batch_texts: List[str], config: PretrainConfig):
@@ -103,7 +108,7 @@ class ActivationStreamer:
         return acts, n_tokens
 
     def stream_activations(
-        self, texts: Iterator[str], config: PretrainConfig, batch_size: int = 16,
+        self, texts: Iterator[str], config: PretrainConfig, batch_size: int = 32,
     ) -> Generator[Dict[int, torch.Tensor], None, None]:
         """流式提取激活 → yields {layer: [N, hidden]}"""
         batch_texts: List[str] = []
@@ -128,22 +133,21 @@ class ActivationStreamer:
         self, activations: Dict[int, torch.Tensor],
         input_ids_cpu: torch.Tensor, positions: Optional[List[int]],
     ) -> Dict[int, torch.Tensor]:
-        """过滤特殊 token 并展平激活。"""
+        """过滤特殊 token 并展平激活（向量化）。"""
         sp_ids = {
             getattr(self.tokenizer, a)
             for a in ('pad_token_id', 'bos_token_id', 'eos_token_id')
             if getattr(self.tokenizer, a, None) is not None
         }
         sampled = input_ids_cpu[:, positions] if positions else input_ids_cpu
-        valid = torch.ones_like(sampled, dtype=torch.bool)
-        for sid in sp_ids:
-            valid &= (sampled != sid)
-        valid_flat = valid.view(-1)
+        sp_tensor = torch.tensor(list(sp_ids), dtype=sampled.dtype)
+        valid_flat = ~torch.isin(sampled, sp_tensor).view(-1)
 
         result = {}
         for idx, acts in activations.items():
             if acts.ndim == 3:
-                filtered = acts.view(-1, acts.shape[-1])[valid_flat]
+                mask = valid_flat.to(acts.device)
+                filtered = acts.view(-1, acts.shape[-1])[mask]
                 if filtered.size(0) > 0:
                     result[idx] = filtered
             else:
@@ -152,14 +156,14 @@ class ActivationStreamer:
 
     def _get_sample_positions(
         self, attention_mask: torch.Tensor, strategy: str, n: int,
-    ) -> List[int]:
+    ) -> Optional[List[int]]:
+        if strategy == "all":
+            return None
         seq_len = attention_mask.shape[1]
         if strategy == "last":
             return [seq_len - 1]
         if strategy == "random":
             return sorted(random.sample(range(seq_len), min(n, seq_len)))
-        if strategy == "all":
-            return list(range(seq_len))
         step = seq_len // n
         return [i * step for i in range(n)]
 
@@ -206,7 +210,7 @@ class ActivationBuffer:
         for idx, acts in activations.items():
             if self.layers is not None and idx not in self.layers:
                 continue
-            self._buffers.setdefault(idx, []).append(acts.cpu() if acts.is_cuda else acts)
+            self._buffers.setdefault(idx, []).append(acts)
         if self._buffers:
             first = next(iter(self._buffers.values()))
             self._current_size = sum(t.shape[0] for t in first)
@@ -227,7 +231,7 @@ class ActivationBuffer:
 #  便捷入口
 def create_pretrain_data_iterator(
     model, tokenizer, config: PretrainConfig, layers: List[int],
-    batch_size: int = 16, buffer_size: int = 8192, device: str = "cuda",
+    batch_size: int = 32, buffer_size: int = 8192, device: str = "cuda",
 ) -> Generator[Dict[int, torch.Tensor], None, None]:
     """组合数据加载 + 激活提取 + 缓冲 → yields {layer: [buffer_size, hidden]}"""
     if buffer_size is None:
