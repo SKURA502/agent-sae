@@ -108,7 +108,6 @@ class TopKSAE(nn.Module):
         x_hat, latent = self.forward(x)
         loss = (((x_hat - x) ** 2).mean(dim=-1) / (x**2).mean(dim=-1)).mean()
         loss_dict = {
-            "loss": loss.item(),
             "mean_activation": latent[latent > 0].mean().item() if (latent > 0).any() else 0,
         }
         return loss, loss_dict

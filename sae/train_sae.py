@@ -104,7 +104,6 @@ class SAETrainer:
 
         return {
             "loss": float(loss.item()),
-            "reconstruction_loss": float(loss_dict["loss"]),
             "mean_activation": float(loss_dict["mean_activation"]),
             "lr": float(scheduler.get_last_lr()[0]),
             "global_step": float(self.global_step),
@@ -225,7 +224,6 @@ class SAETrainer:
             return
         log_data = {
             "train/loss": metrics["loss"],
-            "train/reconstruction_loss": metrics["reconstruction_loss"],
             "train/mean_activation": metrics["mean_activation"],
             "train/lr": metrics["lr"],
             "global_step": self.global_step,
@@ -235,7 +233,6 @@ class SAETrainer:
         else:
             tqdm.write(
                 f"[Step {self.global_step}] loss={metrics['loss']:.4f} "
-                f"recon={metrics['reconstruction_loss']:.4f} "
                 f"mean_act={metrics['mean_activation']:.4f} "
                 f"lr={metrics['lr']:.2e}"
             )
@@ -447,14 +444,6 @@ class TwoStageTrainer:
 
         self.sae_trainer = trainer
         return {layer: str(self.output_dir / "stage2" / ckpt_name)}
-
-    def train_stage2(
-        self,
-        stage1_checkpoint: Optional[str],
-        tooluse_config: Optional[Dict[str, Any]] = None,
-    ) -> Dict[int, str]:
-        """兼容旧接口：等价于 init_stage2。"""
-        return self.init_stage2(stage1_checkpoint, tooluse_config)
 
     def train_stage2_streaming(
         self,
