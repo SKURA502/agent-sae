@@ -492,6 +492,7 @@ class TwoStageTrainer:
             buffer_size=buffer_size, device=self.device,
         )
         trainer.train_streaming(gen, layer, total_steps)
+        trainer.model._normalize_decoder()
         trainer.save_checkpoint(ckpt_name)
         print("Stage 1 complete!")
         return {layer: str(self.output_dir / "stage1" / ckpt_name)}
@@ -556,6 +557,7 @@ class TwoStageTrainer:
             self.model_name_or_path, self.layer,
             trainer.config.dict_size, target_tokens, "stage2",
         )
+        trainer.model._normalize_decoder()
         trainer.save_checkpoint(ckpt)
         return paths
 
