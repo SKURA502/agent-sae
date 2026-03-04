@@ -40,7 +40,7 @@ class TopKSAE(nn.Module):
         self.decoder = nn.Linear(config.dict_size, config.input_dim, bias=False)
         self._normalize_decoder() 
         self.encoder = nn.Linear(config.input_dim, config.dict_size, bias=False)
-        self.encoder.weight.data = self.decoder.weight.data.t()  
+        self.encoder.weight.data = self.decoder.weight.data.T.clone()
         self.pre_bias = nn.Parameter(torch.zeros(config.input_dim))
 
         self.to(config.device)
