@@ -301,7 +301,8 @@ def main():
     p1 = sub.add_parser("collect", help="收集特征激活上下文")
     p1.add_argument("--model_path", required=True, help="LLM 路径")
     p1.add_argument("--sae_path", required=True, help="SAE checkpoint 路径")
-    p1.add_argument("--data_path", required=True, help="JSONL 文本数据路径 (每行 {\"text\": ...})")
+    p1.add_argument("--data_path", default="/data/agent_tool_use/Agent-Tool-Use-MI/data/raw/pretrain", help="JSONL 文件或文件夹路径")
+    p1.add_argument("--target_tokens", type=int, default=10_000_000, help="目标 token 数 (默认 10M)")
     p1.add_argument("--layer", type=int, required=True, help="目标层 (0-indexed)")
     p1.add_argument("--output", default=None)
     p1.add_argument("--threshold", type=float, default=10.0)
@@ -328,12 +329,21 @@ def main():
         ).to(args.device).eval()
         sae = TopKSAE.load(args.sae_path, device=args.device)
 
-        # 读取文本
-        import jsonlines
+        # 读取文本（支持单文件或文件夹，按 target_tokens 截断）
+        import glob, jsonlines
         def read_texts():
-            with jsonlines.open(args.data_path) as reader:
-                for obj in reader:
-                    yield obj.get("text", "")
+            files = (sorted(glob.glob(os.path.join(args.data_path, "*.jsonl")))
+                     if os.path.isdir(args.data_path) else [args.data_path])
+            total = 0
+            for fp in files:
+                with jsonlines.open(fp) as reader:
+                    for obj in reader:
+                        text = obj.get("text", "")
+                        total += len(text.split())
+                        yield text
+                        if total >= args.target_tokens:
+                            logger.info(f"已达目标 token 数 {args.target_tokens}, 停止读取")
+                            return
 
         collector = ContextCollector(model, tokenizer, sae, args.layer,
                                      sae_path=args.sae_path, device=args.device)
