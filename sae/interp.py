@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 SENTENCE_ENDERS = {".", "!", "?", "<|end_of_text|>", '"'}
 _RESP_RE = re.compile(
-    r"Score:\s*(?P<score>[1-5])\s*\n"
+    r"Score:\s*(?P<score>[1-5])\s*(?:\r?\n)+"
     r"Explanation:\s*(?P<explanation>.+)",
     re.IGNORECASE | re.DOTALL,
 )
@@ -70,6 +70,14 @@ def _build_context(seq_pos: int, tokens: List[str], max_len: int = 64):
     return (text, raw.strip()) if text else None
 
 
+def _add_selected_prefix(path: str) -> str:
+    """给输出文件名添加 selected_ 前缀。"""
+    directory, filename = os.path.split(path)
+    if filename.startswith("selected_"):
+        return path
+    return os.path.join(directory, f"selected_{filename}")
+
+
 # ── ContextCollector ─────────────────────────────────────────
 
 class ContextCollector:
@@ -112,11 +120,15 @@ class ContextCollector:
     def collect(self, texts: Iterator[str], output_path: Optional[str] = None,
                 threshold: float = 10.0, max_length: int = 64,
                 max_per_token: int = 3, min_contexts: int = 5,
-                max_token_classes: int = 0, max_seq_length: int = 512,
-                batch_size: int = 4) -> Tuple[int, str]:
+                max_token_classes: int = 0, max_seq_length: int = 1024,
+                batch_size: int = 16,
+                selected_feature_ids: Optional[List[int]] = None) -> Tuple[int, str]:
         """收集特征激活上下文 → JSON"""
+        selected_set = set(selected_feature_ids) if selected_feature_ids else None
         if output_path is None:
             output_path = f"outputs/contexts/{self.sae_name}_{threshold}.json"
+        if selected_set:
+            output_path = _add_selected_prefix(output_path)
         self._register_hook()
         self.model.eval(); self.sae.eval()
         ctx_map: Dict[int, Dict[str, list]] = defaultdict(lambda: defaultdict(list))
@@ -125,12 +137,12 @@ class ContextCollector:
         for text in texts:
             buf.append(text)
             if len(buf) >= batch_size:
-                self._process(buf, ctx_map, threshold, max_length, max_per_token, max_seq_length)
+                self._process(buf, ctx_map, threshold, max_length, max_per_token, max_seq_length, selected_set)
                 n += len(buf); buf = []
                 if n % (batch_size * 10) == 0:
                     logger.info(f"已处理 {n} 条文本")
         if buf:
-            self._process(buf, ctx_map, threshold, max_length, max_per_token, max_seq_length)
+            self._process(buf, ctx_map, threshold, max_length, max_per_token, max_seq_length, selected_set)
             n += len(buf)
 
         self._remove_hook()
@@ -162,7 +174,7 @@ class ContextCollector:
         logger.info(f"提取 {len(filtered)} 个特征上下文 → {output_path}")
         return len(filtered), output_path
 
-    def _process(self, texts, ctx_map, threshold, max_length, max_per_token, max_seq_len):
+    def _process(self, texts, ctx_map, threshold, max_length, max_per_token, max_seq_len, selected_set=None):
         inp = self.tokenizer(texts, return_tensors="pt", max_length=max_seq_len,
                              padding=True, truncation=True)
         ids = inp["input_ids"].to(self.device)
@@ -177,6 +189,8 @@ class ContextCollector:
         for i in range(bs):
             toks = self.tokenizer.convert_ids_to_tokens(ids[i].cpu().tolist())
             for pos, dim in torch.nonzero(latents[i] > threshold, as_tuple=False).tolist():
+                if selected_set is not None and dim not in selected_set:
+                    continue
                 r = _build_context(pos, toks, max_length)
                 if r is None:
                     continue
@@ -211,22 +225,81 @@ class FeatureInterpreter:
                  api_base: Optional[str] = None):
         self.model_name = model
         from openai import OpenAI
-        kw = {"api_key": api_key}
-        if api_base:
-            kw["base_url"] = api_base
-        self.client = OpenAI(**kw)
+        self.client = OpenAI(
+            base_url=api_base if api_base else "https://api.openai.com/v1",
+            api_key=api_key
+        )
+
+    @staticmethod
+    def _content_to_text(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content.strip()
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, str):
+                    if item.strip():
+                        parts.append(item.strip())
+                    continue
+                if isinstance(item, dict):
+                    text = item.get("text") or item.get("content") or item.get("value")
+                else:
+                    text = getattr(item, "text", None) or getattr(item, "content", None) or getattr(item, "value", None)
+                text = FeatureInterpreter._content_to_text(text)
+                if text:
+                    parts.append(text)
+            return "\n".join(parts).strip()
+        if isinstance(content, dict):
+            return FeatureInterpreter._content_to_text(
+                content.get("text") or content.get("content") or content.get("value")
+            )
+        return str(content).strip()
+
+    @staticmethod
+    def _strip_code_fences(text: str) -> str:
+        text = text.strip()
+        if text.startswith("```") and text.endswith("```"):
+            lines = text.splitlines()
+            if len(lines) >= 3:
+                return "\n".join(lines[1:-1]).strip()
+        return text
+
+    @staticmethod
+    def _extract_chat_text(response: Any) -> str:
+        choices = getattr(response, "choices", None)
+        if not choices:
+            return ""
+        message = getattr(choices[0], "message", None)
+        text = FeatureInterpreter._content_to_text(getattr(message, "content", None))
+        return FeatureInterpreter._strip_code_fences(text)
 
     def _chat(self, prompt: str, retries: int = 3) -> str:
         for i in range(1, retries + 1):
             try:
-                r = self.client.chat.completions.create(
-                    messages=[{"role": "system", "content": self.SYSTEM_PROMPT},
-                              {"role": "user", "content": prompt}],
-                    model=self.model_name, max_tokens=256, temperature=0.1)
-                c = r.choices[0].message.content
-                if c is None:
-                    raise ValueError("API returned None")
-                return c.strip()
+                try:
+                    r = self.client.chat.completions.create(
+                        messages=[{"role": "system", "content": self.SYSTEM_PROMPT},
+                                  {"role": "user", "content": prompt}],
+                        model=self.model_name, max_completion_tokens=256, temperature=0.1)
+                except TypeError:
+                    r = self.client.chat.completions.create(
+                        messages=[{"role": "system", "content": self.SYSTEM_PROMPT},
+                                  {"role": "user", "content": prompt}],
+                        model=self.model_name, max_tokens=256, temperature=0.1)
+                except Exception as e:
+                    if "max_completion_tokens" not in str(e):
+                        raise
+                    r = self.client.chat.completions.create(
+                        messages=[{"role": "system", "content": self.SYSTEM_PROMPT},
+                                  {"role": "user", "content": prompt}],
+                        model=self.model_name, max_tokens=256, temperature=0.1)
+
+                text = self._extract_chat_text(r)
+                if not text:
+                    raise ValueError("API returned empty content")
+                return text.strip()
             except Exception as e:
                 logger.warning(f"API 失败 ({i}/{retries}): {e}")
                 if i < retries:
@@ -251,7 +324,10 @@ class FeatureInterpreter:
         random.seed(seed)
         with open(context_path, "r", encoding="utf-8") as f:
             ctx_map = json.load(f).get("latent_context_map", {})
-        keys = sorted(random.sample(list(ctx_map.keys()), min(sample_features, len(ctx_map))))
+        if sample_features >= len(ctx_map):
+            keys = sorted(ctx_map.keys(), key=int)
+        else:
+            keys = sorted(random.sample(list(ctx_map.keys()), sample_features), key=int)
         logger.info(f"采样 {len(keys)}/{len(ctx_map)} 个特征")
 
         results, total, scored = {}, 0.0, 0
@@ -269,7 +345,8 @@ class FeatureInterpreter:
                     results[key] = {"score": s, "explanation": m.group("explanation").strip()}
                     total += s; scored += 1
                 else:
-                    results[key] = {"score": None, "explanation": f"Parse failed: {resp[:200]}"}
+                    snippet = resp.replace("\n", " ")[:200]
+                    results[key] = {"score": None, "explanation": f"Parse failed: {snippet}"}
             except Exception as e:
                 logger.error(f"特征 {key}: {e}")
                 results[key] = {"score": None, "explanation": str(e)}
@@ -280,7 +357,8 @@ class FeatureInterpreter:
         summary = {"avg_score": round(avg, 4), "features_scored": scored, "model": self.model_name}
         logger.info(f"完成: {scored} 个特征, 平均 {avg:.2f}")
 
-        out = {**summary, "results": results}
+        sorted_results = dict(sorted(results.items(), key=lambda kv: int(kv[0])))
+        out = {**summary, "results": sorted_results}
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(out, f, ensure_ascii=False, indent=2)
@@ -306,8 +384,10 @@ def main():
     p1.add_argument("--layer", type=int, required=True, help="目标层 (0-indexed)")
     p1.add_argument("--output", default=None)
     p1.add_argument("--threshold", type=float, default=10.0)
-    p1.add_argument("--batch_size", type=int, default=4)
+    p1.add_argument("--batch_size", type=int, default=16)
     p1.add_argument("--device", default="cuda")
+    p1.add_argument("--feature_ids", type=int, nargs="+", default=None,
+                    help="仅收集这些 feature id 的上下文")
 
     # ---- interpret 子命令 ----
     p2 = sub.add_parser("interpret", help="调用 LLM API 解释特征")
@@ -315,7 +395,7 @@ def main():
     p2.add_argument("--output", default=None)
     p2.add_argument("--api_key", required=True)
     p2.add_argument("--api_base", default=None)
-    p2.add_argument("--llm_model", default="gpt-4o")
+    p2.add_argument("--llm_model", default="gpt-5")
     p2.add_argument("--sample", type=int, default=100)
 
     args = parser.parse_args()
@@ -350,6 +430,7 @@ def main():
         n, path = collector.collect(
             read_texts(), output_path=args.output,
             threshold=args.threshold, batch_size=args.batch_size,
+            selected_feature_ids=args.feature_ids,
         )
         print(f"✅ 收集完成: {n} 个特征 → {path}")
 

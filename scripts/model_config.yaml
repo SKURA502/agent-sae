@@ -12,19 +12,10 @@ models:
     hidden_size: 4096
     num_layers: 32
     # Hook 层位置（3/4位置, Layer 0为第一层）
-    hook_layer: 23
+    hook_layer: 25
     # 残差流 hook 点名称
     hook_point: "model.layers.{layer}.mlp.down_proj"
     # 是否为 tool-tuned 模型
-    is_tool_tuned: true
-  
-  qwen3-4b:
-    name: "Qwen/Qwen3-4B"
-    local_path: "/data/models/Qwen3-4B"
-    hidden_size: 2560
-    num_layers: 36
-    hook_layer: 26
-    hook_point: "model.layers.{layer}.mlp.down_proj"
     is_tool_tuned: true
 
   qwen3-8b:
@@ -35,32 +26,23 @@ models:
     hook_layer: 26
     hook_point: "model.layers.{layer}.mlp.down_proj"
     is_tool_tuned: true
-    
-  qwen3-14b:
-    name: "Qwen/Qwen3-14B"
-    local_path: "/data/models/Qwen3-14b"
-    hidden_size: 5120
-    num_layers: 40
-    hook_layer: 29
-    hook_point: "model.layers.{layer}.mlp.down_proj"
-    is_tool_tuned: true
-    
-  gemma3-4b:
-    name: "google/gemma-3-4b-it"
-    local_path: "/data/models/gemma-3-4b-it"
+
+  qwen3.5-4b:
+    name: "Qwen/Qwen3.5-4B"
+    local_path: "/data/models/Qwen3.5-4B"
     hidden_size: 2560
-    num_layers: 34
-    hook_layer: 24
-    hook_point: "language_model.model.layers.{layer}.post_feedforward_layernorm"
+    num_layers: 32
+    hook_layer: 25
+    hook_point: "model.language_model.layers.{layer}.mlp.down_proj"
     is_tool_tuned: true
-    
-  gemma3-12b:
-    name: "google/gemma-3-12b-it"
-    local_path: "/data/models/gemma-3-12b-it"
+
+  qwen3.5-9b:
+    name: "Qwen/Qwen3.5-9B"
+    local_path: "/data/models/Qwen3.5-9B"
     hidden_size: 4096
-    num_layers: 48
-    hook_layer: 35
-    hook_point: "language_model.model.layers.{layer}.post_feedforward_layernorm"
+    num_layers: 32
+    hook_layer: 25
+    hook_point: "model.language_model.layers.{layer}.mlp.down_proj"
     is_tool_tuned: true
 
 # 推理配置
