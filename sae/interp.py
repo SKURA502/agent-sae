@@ -76,9 +76,10 @@ class ContextCollector:
     """收集 SAE 每个特征的高激活上下文片段。"""
 
     def __init__(self, model: nn.Module, tokenizer, sae: TopKSAE,
-                 layer: int, device: str = "cuda"):
+                 layer: int, sae_path: str = "", device: str = "cuda"):
         self.model, self.tokenizer, self.sae = model, tokenizer, sae
         self.layer, self.device = layer, device
+        self.sae_name = os.path.splitext(os.path.basename(sae_path))[0] if sae_path else "sae"
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
         self._hidden: Optional[torch.Tensor] = None
@@ -108,12 +109,14 @@ class ContextCollector:
 
     # -- 主逻辑 --
     @torch.no_grad()
-    def collect(self, texts: Iterator[str], output_path: str = "contexts.json",
+    def collect(self, texts: Iterator[str], output_path: Optional[str] = None,
                 threshold: float = 10.0, max_length: int = 64,
                 max_per_token: int = 3, min_contexts: int = 5,
                 max_token_classes: int = 0, max_seq_length: int = 512,
                 batch_size: int = 4) -> Tuple[int, str]:
         """收集特征激活上下文 → JSON"""
+        if output_path is None:
+            output_path = f"outputs/contexts/{self.sae_name}_{threshold}.json"
         self._register_hook()
         self.model.eval(); self.sae.eval()
         ctx_map: Dict[int, Dict[str, list]] = defaultdict(lambda: defaultdict(list))
@@ -239,9 +242,12 @@ class FeatureInterpreter:
         p += "Provide your response in the following fixed format:\nScore: [5/4/3/2/1]\nExplanation: [Your brief explanation]\n"
         return p
 
-    def run(self, context_path: str, output_path: str = "interp_results.json",
+    def run(self, context_path: str, output_path: Optional[str] = None,
             sample_features: int = 100, seed: int = 42) -> Dict[str, Any]:
         """对采样特征执行 LLM 评分，返回 {avg_score, features_scored, model}"""
+        if output_path is None:
+            ctx_name = os.path.splitext(os.path.basename(context_path))[0]
+            output_path = f"outputs/contexts/interp_{ctx_name}.json"
         random.seed(seed)
         with open(context_path, "r", encoding="utf-8") as f:
             ctx_map = json.load(f).get("latent_context_map", {})
@@ -297,7 +303,7 @@ def main():
     p1.add_argument("--sae_path", required=True, help="SAE checkpoint 路径")
     p1.add_argument("--data_path", required=True, help="JSONL 文本数据路径 (每行 {\"text\": ...})")
     p1.add_argument("--layer", type=int, required=True, help="目标层 (0-indexed)")
-    p1.add_argument("--output", default="contexts.json")
+    p1.add_argument("--output", default=None)
     p1.add_argument("--threshold", type=float, default=10.0)
     p1.add_argument("--batch_size", type=int, default=4)
     p1.add_argument("--device", default="cuda")
@@ -305,7 +311,7 @@ def main():
     # ---- interpret 子命令 ----
     p2 = sub.add_parser("interpret", help="调用 LLM API 解释特征")
     p2.add_argument("--context_path", required=True, help="collect 输出的 JSON")
-    p2.add_argument("--output", default="interp_results.json")
+    p2.add_argument("--output", default=None)
     p2.add_argument("--api_key", required=True)
     p2.add_argument("--api_base", default=None)
     p2.add_argument("--llm_model", default="gpt-4o")
@@ -329,7 +335,8 @@ def main():
                 for obj in reader:
                     yield obj.get("text", "")
 
-        collector = ContextCollector(model, tokenizer, sae, args.layer, args.device)
+        collector = ContextCollector(model, tokenizer, sae, args.layer,
+                                     sae_path=args.sae_path, device=args.device)
         n, path = collector.collect(
             read_texts(), output_path=args.output,
             threshold=args.threshold, batch_size=args.batch_size,
