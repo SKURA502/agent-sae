@@ -30,6 +30,16 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 from .sae_model import TopKSAE, SAEConfig
 
 
+def pre_process(
+    hidden_stats: torch.Tensor, 
+    eps: float = 1e-8
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Normalize hidden states to zero mean and unit variance."""
+    mean = hidden_stats.mean(dim=-1, keepdim=True)
+    std = hidden_stats.std(dim=-1, keepdim=True)
+    x = (hidden_stats - mean) / (std + eps)
+    return x, mean, std
+
 # ---------- 流式训练辅助工具 ----------
 
 def _prefetch_generator(gen, maxsize=2):
@@ -161,7 +171,9 @@ class SAETrainer:
         batch = batch.to(self.config.device)
         self.optimizer.zero_grad(set_to_none=True)
 
-        loss, loss_dict = self.model.compute_loss(batch)
+        x, _, _ = pre_process(batch)
+        loss, loss_dict = self.model.compute_loss(x)
+        
         loss.backward()
         self.optimizer.step()
         scheduler.step()
