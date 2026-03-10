@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 
 SENTENCE_ENDERS = {".", "!", "?", "<|end_of_text|>", '"'}
 _RESP_RE = re.compile(
-    r"Score:\s*(?P<score>[1-5])\s*(?:\r?\n)+"
-    r"Explanation:\s*(?P<explanation>.+)",
+    r"(?:\*)*\s*Score\s*(?:\*)*\s*[:\-]?\s*(?:\*)*\s*(?P<score>[1-5])\s*(?:\*)*\s*"
+    r"(?:\r?\n|\s)+"
+    r"(?:\*)*\s*Explanation\s*(?:\*)*\s*[:\-]?\s*(?:\*)*\s*(?P<explanation>.+)",
     re.IGNORECASE | re.DOTALL,
 )
 
