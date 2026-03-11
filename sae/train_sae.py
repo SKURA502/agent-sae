@@ -31,13 +31,13 @@ from .sae_model import TopKSAE, SAEConfig
 
 
 def pre_process(
-    hidden_stats: torch.Tensor, 
+    hidden_states: torch.Tensor, 
     eps: float = 1e-8
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Normalize hidden states to zero mean and unit variance."""
-    mean = hidden_stats.mean(dim=-1, keepdim=True)
-    std = hidden_stats.std(dim=-1, keepdim=True)
-    x = (hidden_stats - mean) / (std + eps)
+    mean = hidden_states.mean(dim=-1, keepdim=True)
+    std = hidden_states.std(dim=-1, keepdim=True)
+    x = (hidden_states - mean) / (std + eps)
     return x, mean, std
 
 # ---------- 流式训练辅助工具 ----------
