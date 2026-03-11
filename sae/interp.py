@@ -314,6 +314,7 @@ class FeatureInterpreter:
         self.client = OpenAI(
             base_url=api_base if api_base else "https://api.openai.com/v1",
             api_key=api_key,
+            timeout=30,
         )
 
     @staticmethod
@@ -376,19 +377,18 @@ class FeatureInterpreter:
             try:
                 try:
                     response = self.client.chat.completions.create(
-                        **common_kwargs, max_completion_tokens=256
+                        **common_kwargs, max_completion_tokens=4096
                     )
                 except TypeError:
                     response = self.client.chat.completions.create(
-                        **common_kwargs, max_tokens=256
+                        **common_kwargs, max_tokens=4096
                     )
                 except Exception as e:
                     if "max_completion_tokens" not in str(e):
                         raise
                     response = self.client.chat.completions.create(
-                        **common_kwargs, max_tokens=256
+                        **common_kwargs, max_tokens=4096
                     )
-
                 text = self._extract_chat_text(response)
                 if not text:
                     raise ValueError("API returned empty content")

@@ -143,7 +143,7 @@ if __name__ == "__main__":
     parser.add_argument("--ckpt_path", type=str, help="Path to the SAE checkpoint file")
     parser.add_argument("--device", type=str, default="auto", help="Device to load the model on (cuda/cpu/mps/auto)")
     parser.add_argument("--chunk_size", type=int, default=2048, help="Chunk size for matrix multiplication to save memory")
-    parser.add_argument("--topk", type=int, default=3, help="Number of most similar feature pairs to report")
+    parser.add_argument("--topk", type=int, default=5, help="Number of most similar feature pairs to report")
     args = parser.parse_args()
 
     calc_average_cos_sim(
