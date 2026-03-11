@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 
 from .sae_model import TopKSAE
+from .train_sae import pre_process
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,7 @@ class ContextCollector:
             return
         h = self._hidden
         bs, sl, hd = h.shape
+        h, _, _ = pre_process(h)
         latents = self.sae.encode(h.reshape(-1, hd).to(self.sae.config.get_torch_dtype()))
         latents = latents.reshape(bs, sl, -1)
 
