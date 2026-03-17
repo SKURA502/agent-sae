@@ -1,76 +1,53 @@
-# Agent SAE Tool-use
+# Agent SAE Tool-use MI
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-Mechanistic interpretability framework for understanding tool-use decisions in LLM agents with Sparse Autoencoders (SAE).
+Mechanistic interpretability of tool-use decisions in LLM agents using Sparse Autoencoders (SAE).
 
-## Overview
+## Research Questions
 
-This repository provides a research workflow to:
+> Which internal representations in an LLM gate tool-call decisions?
 
-- generate agent rollouts for tool-use tasks,
-- train SAEs with a two-stage pipeline,
-- analyze feature-level CALL/NO_CALL signals,
-- run steering experiments for causal checks.
+Three hypotheses — H1 (gating features), H3 (causal controllability), H2 (evidence accumulation).
+See [docs/goal.md](docs/goal.md) for the full research design.
 
-## Project structure
+## Project Structure
 
-```text
-Agent-Tool-Use-MI/
-├── .gitignore
-├── LICENSE
-├── README.md
-├── requirements.txt
-├── main.py
-├── controller/
-│   ├── __init__.py
-│   ├── agent_loop.py
-│   ├── output_parser.py
-│   ├── tool_schema.py
-│   └── sandbox_tools/
-│       ├── __init__.py
-│       ├── calculator.py
-│       ├── lookup.py
-│       ├── search.py
-│       └── tool_utils.py
-├── tasks/
-│   ├── __init__.py
-│   ├── base_adapter.py
-│   ├── bfcl_adapter.py
-│   ├── synthetic_generator.py
-│   └── when2call_adapter.py
-├── run/
-│   ├── __init__.py
-│   ├── cache_activations.py
-│   ├── generate_rollouts.py
-│   └── rollout_logger.py
-├── sae/
-│   ├── __init__.py
-│   ├── feature_extraction.py
-│   ├── pretrain_data.py
-│   ├── sae_model.py
-│   └── train_sae.py
-├── analysis/
-│   ├── __init__.py
-│   ├── correlation_analysis.py
-│   ├── linear_probe.py
-│   ├── steering.py
-│   └── visualization.py
-├── scripts/
-│   ├── quick_test.py
-│   ├── model_config.yaml
-│   ├── run_pipeline.sh
-│   └── run_steering.sh
-├── data/
-│   ├── raw/
-│   ├── processed/
-│   └── rollouts/
-└── outputs/
-    ├── analysis_results/
-    ├── figures/
-    └── sae_checkpoints/
 ```
+Agent-Tool-Use-MI/
+├── configs/            # model_config.yaml (stable model metadata)
+├── controller/         # agent loop, tool schema, sandbox tools
+├── tasks/              # dataset adapters: When2Call, BFCL, synthetic
+├── run/                # activation extraction, SAE Stage 2 training
+├── sae/                # two-stage SAE training, feature extraction
+├── analysis/           # correlation, linear probe, steering, visualization
+├── scripts/            # pipeline scripts, quick test
+├── data/               # raw datasets (not committed)
+└── outputs/            # checkpoints, activations, analysis results
+```
+
+## Model
+
+Primary: **Qwen3.5-4B-Instruct** (`hidden_size=2560, num_layers=32`)
+
+Hook layers: `L24` (`int(32×3/4)`) and `L26` (`int(32×5/6)`)
+
+SAE: `dict_size = hidden_size × 8 = 20480`, `k = hidden_size // 32 = 80`
+
+## Datasets
+
+| File | Size | Label | Use |
+|------|------|-------|-----|
+| `when2call_train_pref.jsonl` | 9K | 3K CALL + 6K NO_CALL | SAE Stage 2 training |
+| `when2call_test_mcq.jsonl` | 3,652 | tool_call / cannot_answer / request_for_info | H1/H3 evaluation |
+| `BFCL_v4_irrelevance.json` | 240 | NO_CALL | H1 generalization |
+| `BFCL_v4_live_irrelevance.json` | 884 | NO_CALL | H1 generalization |
+| `BFCL_v4_simple_python.json` | 400 | CALL | H1 generalization |
+| `BFCL_v4_live_simple.json` | 258 | CALL | H1 generalization |
+
+When2Call label parsing: `chosen_response.content` containing `<TOOLCALL>` → CALL, otherwise NO_CALL.
+MCQ evaluation uses binary subset only (tool_call vs cannot_answer, 2,590 samples; request_for_info excluded).
 
 ## Installation
 
@@ -78,124 +55,112 @@ Agent-Tool-Use-MI/
 pip install -r requirements.txt
 ```
 
-## CLI entrypoints
+## Quick Start
 
-You can use both entry styles:
-
-1. Unified entry: `python main.py ...`
-2. Module entry: `python -m ...`
-
-`main.py` forwards training-related commands to module CLIs to keep logic centralized.
-
-## Configuration
-
-### Model presets
-
-- File: `configs/model_config.yaml`
-- Purpose: stable model metadata (name, hidden size, default hook layers, etc.)
-
-### Experiment settings
-
-Use command line args for dataset, layers, training hyperparameters, output paths, and runtime options.
-
-## Quick start
-
-### A. Generate rollouts
+### Smoke test (no GPU required)
 
 ```bash
-python main.py generate-rollouts \
-  --model-key llama3-8b \
-  --dataset synthetic \
-  --num-samples 1000 \
-  --layers 24 27 \
-  --output-dir ./outputs/rollouts \
-  --device cuda
+python scripts/quick_test.py
 ```
 
-Override model preset directly:
-
-```bash
-python main.py generate-rollouts \
-  --model meta-llama/Llama-3-8B-Instruct \
-  --dataset when2call \
-  --data-path ./data/raw/when2call \
-  --split test \
-  --num-samples 1000
-```
-
-### B. Stage 1 SAE training
+### Stage 1 SAE training (OpenWebText2, 50M tokens)
 
 ```bash
 python -m sae.train_sae stage1 \
-  --model meta-llama/Llama-3-8B-Instruct \
-  --layers 24 27 \
+  --model Qwen/Qwen3.5-4B-Instruct \
+  --layer 24 \
   --target-tokens 50000000 \
   --data-dir ./data/raw/pretrain \
   --output-dir ./outputs/sae_checkpoints \
   --device cuda
 ```
 
-Equivalent via unified entry:
+Repeat for `--layer 26`.
+
+### Stage 2 SAE training (When2Call Pref, balanced 3K+3K)
 
 ```bash
-python main.py train-sae stage1 --model meta-llama/Llama-3-8B-Instruct --layers 24 27
-```
-
-### C. Stage 2 streaming training
-
-```bash
-python -m run.cache_activations train \
-  --model meta-llama/Llama-3-8B-Instruct \
-  --dataset synthetic \
-  --num-samples 2000 \
-  --layers 24 27 \
+python -m run.cache_activations stage2 \
+  --model Qwen/Qwen3.5-4B-Instruct \
+  --dataset when2call \
+  --data-path ./data/raw/when2call \
+  --split train_pref \
+  --layers 24 26 \
   --stage1-dir ./outputs/sae_checkpoints/stage1 \
   --output-dir ./outputs/sae_checkpoints \
-  --target-tokens 50000000 \
+  --learning-rate 5e-4 \
   --batch-size 4096 \
-  --learning-rate 5e-5 \
+  --num-epochs 3 \
+  --balance \
   --device cuda
 ```
 
-Equivalent via unified entry:
+### Extract test activations (for H1/H3 analysis)
 
 ```bash
-python main.py cache-activations train --model meta-llama/Llama-3-8B-Instruct --dataset synthetic --layers 24 27 --stage1-dir ./outputs/sae_checkpoints/stage1
+# When2Call MCQ binary subset
+python -m run.cache_activations extract \
+  --model Qwen/Qwen3.5-4B-Instruct \
+  --dataset when2call \
+  --data-path ./data/raw/when2call \
+  --split test_mcq \
+  --layers 24 26 \
+  --output-dir ./outputs/activations/when2call_mcq \
+  --device cuda
+
+# BFCL generalization
+python -m run.cache_activations extract \
+  --model Qwen/Qwen3.5-4B-Instruct \
+  --dataset bfcl \
+  --data-path ./data/raw/bfcl \
+  --layers 24 26 \
+  --output-dir ./outputs/activations/bfcl_gen \
+  --device cuda
 ```
 
-## Analysis
-
-`main.py analyze` requires serialized activations via `--data-path`:
+### H1: Correlation analysis + Linear probe
 
 ```bash
-python main.py analyze \
-  --analysis-type correlation \
-  --sae-path ./outputs/sae_checkpoints/stage2/<your-stage2-ckpt>.pt \
-  --data-path ./outputs/activations/layer_24_activations.pt \
+python -m analysis.correlation_analysis \
+  --sae-path ./outputs/sae_checkpoints/stage2/<ckpt>.pt \
+  --data-path ./outputs/activations/when2call_mcq/layer_24_activations.pt \
   --layer 24 \
-  --output-dir ./outputs/analysis/layer_24
+  --output-dir ./outputs/analysis/layer_24/when2call_mcq \
+  --device cuda
+
+python -m analysis.linear_probe \
+  --sae-path ./outputs/sae_checkpoints/stage2/<ckpt>.pt \
+  --data-path ./outputs/activations/when2call_mcq/layer_24_activations.pt \
+  --layer 24 \
+  --output-dir ./outputs/analysis/layer_24/when2call_mcq \
+  --device cuda
 ```
 
-The same interface applies to `probe` and `visualize`.
+### H3: Steering experiments
 
-## Scripts
+```bash
+bash scripts/run_steering.sh
+```
 
-- `scripts/run_pipeline.sh`: two-stage pipeline script aligned with current checkpoint naming.
-- `scripts/run_steering.sh`: resolves stage2 checkpoints from `./outputs/sae_checkpoints/stage2`.
-- `scripts/quick_test.py`: quick API-level sanity checks.
+### Full pipeline (Stage 1 → Stage 2 → H1 → H3)
 
-## Notes
+```bash
+bash scripts/run_pipeline.sh
+```
 
-Checkpoint naming conventions:
+## Checkpoint Naming
 
-- Stage1: `*-layer{L}-*-stage1.pt`
-- Stage2: `*-layer{L}-*-stage2.pt`
+- Stage 1: `{model}-L{layer}-d{dict_size}-{tokens}M-stage1.pt`
+- Stage 2: `{model}-L{layer}-d{dict_size}-{tokens}M-stage2.pt`
 
-Both `sae.train_sae` and `run.cache_activations` use the same naming pattern.
+## Key Metrics
 
-## Contributing
-
-Issues and pull requests are welcome.
+| Metric | Hypothesis | Target |
+|--------|-----------|--------|
+| Top-feature AUROC | H1 | > 0.75 |
+| Linear probe AUC (K=50) | H1 | > 0.80 |
+| Decision flip rate | H3 | > 20% |
+| Δperplexity | H3 | < 20% |
 
 ## License
 
