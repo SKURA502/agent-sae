@@ -12,6 +12,9 @@
 ### 数据
 - [x] When2Call Pref 已确认：3K CALL + 6K NO_CALL（共 9K）；SFT 分割全为 NO_CALL，不可用
 - [x] BFCL Irrelevance 已确认：1,124 条 NO_CALL 样本
+- [x] When2Call MCQ 三类标签已确认：1,295 tool_call / 1,295 cannot_answer / 1,062 request_for_info——H1/H3 使用时须排除 request_for_info，取 2,590 条二类子集
+- [x] BFCL live_relevance 仅 16 条 CALL，不可单独作泛化测试；H1 泛化改用 BFCL Simple ~240 条 CALL 补充
+- [x] tau2-bench 角色已澄清：无现成轨迹，不用于 SAE 训练；H2 rollout 生成时作 prompt 种子
 - [ ] Stage 2 域适应用的无标签工具调用语料未整理（可选，推荐）
 - [ ] Sandbox rollout 未生成（H2 必需）
 
@@ -62,5 +65,6 @@ H1 和 H3 只依赖静态有标签数据（When2Call Pref + test MCQ），adapte
 
 ## 待决问题
 
-- **Stage 2 域适应**：在有标签的 6K 微调之前，是否值得增加一步无标签工具调用语料（When2Call SFT + BFCL 完整语料，~5–10M tokens）？此举可将 SAE 表征空间向工具调用场景靠拢，缩小与 Stage 1 的 token 量级差距。待 H1 快速验证结果出来后再决定。
+- **Stage 2 域适应**：在有标签的 6K 微调之前，是否值得增加一步无标签工具调用语料（When2Call SFT + BFCL 完整语料）？待 H1 快速验证结果出来后再决定。
 - **H2 rollout 设计**：每个 episode 需要多少步，`p_fail` 设置为多少，才能得到干净的积累信号？待 sandbox 跑通后确定。
+- **request_for_info 分析**：MCQ 中的 1,062 条 request_for_info 样本的 SAE feature 激活分布如何？是否介于 CALL 和 NO_CALL 之间？可作为 H1 的补充发现。
