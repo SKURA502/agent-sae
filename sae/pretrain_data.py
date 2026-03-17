@@ -15,7 +15,7 @@ class PretrainConfig:
     data_dir: str = "/data/agent_tool_use/Agent-Tool-Use-MI/data/raw/pretrain"
     target_tokens: int = 50_000_000
     seq_length: int = 1024
-    sample_position: str = "all"   # random / last / all
+    sample_position: str = "all"   # all / last / last_t
     positions_per_seq: int = 1
     seed: int = 42
 
@@ -162,8 +162,9 @@ class ActivationStreamer:
         seq_len = attention_mask.shape[1]
         if strategy == "last":
             return [seq_len - 1]
-        if strategy == "random":
-            return sorted(random.sample(range(seq_len), min(n, seq_len)))
+        if strategy == "last_t":
+            t = n
+            return list(range(max(0, seq_len - t), seq_len))
         step = seq_len // n
         return [i * step for i in range(n)]
 

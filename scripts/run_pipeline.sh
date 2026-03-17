@@ -15,13 +15,13 @@ DEVICE="${DEVICE:-cuda}"
 DTYPE="${DTYPE:-bfloat16}"
 
 PRETRAIN_DIR="$DATA_BASE/pretrain"
+TOOLUSE_DIR="$DATA_BASE/tooluse"
 WHEN2CALL_DIR="$DATA_BASE/when2call"
 BFCL_DIR="$DATA_BASE/bfcl"
 
 STAGE1_TARGET_TOKENS=50000000   # 50M tokens
-STAGE2_MAX_PER_CLASS=3000       # 平衡后每类上限
-STAGE2_EPOCHS=3
-STAGE2_LR=5e-4
+STAGE2_TARGET_TOKENS=10000000   # ~10M tokens（When2Call Pref 全量对话文本）
+STAGE2_LR=5e-5
 STAGE2_BATCH=4096
 
 LAYERS="24 26"                  # 两个 hook 层
@@ -56,27 +56,28 @@ done
 echo "  Stage 1 checkpoints:"
 find "$OUTPUT_BASE/sae_checkpoints/stage1" -name "*-stage1.pt" 2>/dev/null | sort
 
-# ── Step 2：Stage 2 SAE 训练（When2Call Pref，平衡 3K+3K）───────
+# ── Step 2：Stage 2 SAE 训练（When2Call 工具调用对话文本，全 token 流式）──
 echo ""
-echo "▶ Step 2: SAE Stage 2 training (When2Call Pref, balanced ${STAGE2_MAX_PER_CLASS}+${STAGE2_MAX_PER_CLASS})"
+echo "▶ Step 2: SAE Stage 2 training (tool-use JSONL, full-text streaming, ${STAGE2_TARGET_TOKENS} tokens)"
 
-python -m run.cache_activations stage2 \
-  --model "$MODEL_PATH" \
-  --dataset when2call \
-  --data-path "$WHEN2CALL_DIR" \
-  --split train_pref \
-  --num-samples -1 \
-  --layers $LAYERS \
-  --stage1-dir "$OUTPUT_BASE/sae_checkpoints/stage1" \
-  --output-dir "$OUTPUT_BASE/sae_checkpoints" \
-  --learning-rate $STAGE2_LR \
-  --batch-size $STAGE2_BATCH \
-  --num-epochs $STAGE2_EPOCHS \
-  --balance \
-  --max-per-class $STAGE2_MAX_PER_CLASS \
-  --device "$DEVICE" \
-  --dtype "$DTYPE" \
-  --use-swanlab
+for LAYER in $LAYERS; do
+  echo "  Layer $LAYER ..."
+  S1_CKPT=$(find "$OUTPUT_BASE/sae_checkpoints/stage1" \
+    -name "*-L${LAYER}-*-stage1.pt" 2>/dev/null | sort | head -1)
+
+  python -m sae.train_sae stage2 \
+    --model "$MODEL_PATH" \
+    --layer "$LAYER" \
+    --data-dir "$TOOLUSE_DIR" \
+    --stage1-checkpoint "$S1_CKPT" \
+    --output-dir "$OUTPUT_BASE/sae_checkpoints" \
+    --target-tokens $STAGE2_TARGET_TOKENS \
+    --learning-rate $STAGE2_LR \
+    --batch-size $STAGE2_BATCH \
+    --device "$DEVICE" \
+    --dtype "$DTYPE" \
+    --use-swanlab
+done
 
 echo "  Stage 2 checkpoints:"
 find "$OUTPUT_BASE/sae_checkpoints/stage2" -name "*-stage2.pt" 2>/dev/null | sort

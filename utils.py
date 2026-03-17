@@ -34,6 +34,12 @@ def add_stage_args(parser: argparse.ArgumentParser):
     parser.add_argument("--layer", type=int, default=23, help="Target layer of the LLM to attach SAE(starting from 0)")
     parser.add_argument("--output-dir", type=str,
                         default="./outputs/sae_checkpoints")
+    parser.add_argument("--data-dir", type=str, required=True,
+                        help="Directory containing training JSONL files")
+    parser.add_argument("--seq-length", type=int, default=1024,
+                        help="Tokenization sequence length")
+    parser.add_argument("--inference-batch-size", type=int, default=32,
+                        help="LLM inference batch size for activation extraction")
 
 
 def add_dataset_args(parser: argparse.ArgumentParser):

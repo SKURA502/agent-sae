@@ -19,7 +19,7 @@ Agent-Tool-Use-MI/
 ├── configs/            # model_config.yaml (stable model metadata)
 ├── controller/         # agent loop, tool schema, sandbox tools
 ├── tasks/              # dataset adapters: When2Call, BFCL, synthetic
-├── run/                # activation extraction, SAE Stage 2 training
+├── run/                # activation extraction for analysis
 ├── sae/                # two-stage SAE training, feature extraction
 ├── analysis/           # correlation, linear probe, steering, visualization
 ├── scripts/            # pipeline scripts, quick test
@@ -77,28 +77,25 @@ python -m sae.train_sae stage1 \
 
 Repeat for `--layer 26`.
 
-### Stage 2 SAE training (When2Call Pref, balanced 3K+3K)
+### Stage 2 SAE training (tool-use JSONL, full-text streaming)
 
 ```bash
-python -m run.cache_activations stage2 \
+python -m sae.train_sae stage2 \
   --model Qwen/Qwen3.5-4B-Instruct \
-  --dataset when2call \
-  --data-path ./data/raw/when2call \
-  --split train_pref \
-  --layers 24 26 \
-  --stage1-dir ./outputs/sae_checkpoints/stage1 \
+  --layer 24 \
+  --data-dir ./data/raw/tooluse \
+  --stage1-checkpoint ./outputs/sae_checkpoints/stage1/<ckpt>.pt \
+  --target-tokens 10000000 \
   --output-dir ./outputs/sae_checkpoints \
-  --learning-rate 5e-4 \
-  --batch-size 4096 \
-  --num-epochs 3 \
-  --balance \
   --device cuda
 ```
+
+Repeat for `--layer 26`. `--stage1-checkpoint` is optional; omit for random init.
 
 ### Extract test activations (for H1/H3 analysis)
 
 ```bash
-# When2Call MCQ binary subset
+# When2Call MCQ binary subset — action boundary last token (default, H1/H3)
 python -m run.cache_activations extract \
   --model Qwen/Qwen3.5-4B-Instruct \
   --dataset when2call \
@@ -106,6 +103,7 @@ python -m run.cache_activations extract \
   --split test_mcq \
   --layers 24 26 \
   --output-dir ./outputs/activations/when2call_mcq \
+  --hook-position last \
   --device cuda
 
 # BFCL generalization
@@ -115,7 +113,12 @@ python -m run.cache_activations extract \
   --data-path ./data/raw/bfcl \
   --layers 24 26 \
   --output-dir ./outputs/activations/bfcl_gen \
+  --hook-position last \
   --device cuda
+
+# Ablation: mean of last 8 tokens
+python -m run.cache_activations extract \
+  ... --hook-position last_t --last-t 8
 ```
 
 ### H1: Correlation analysis + Linear probe

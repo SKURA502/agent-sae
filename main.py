@@ -153,7 +153,7 @@ def main():
     # cache-activations
     p_cache = subparsers.add_parser(
         "cache-activations",
-        help="Forward to python -m run.cache_activations"
+        help="Forward to python -m run.cache_activations (supports: extract)"
     )
     p_cache.add_argument("cache_args", nargs=argparse.REMAINDER,
                         help="Arguments forwarded to run.cache_activations")
