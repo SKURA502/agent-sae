@@ -1,154 +1,251 @@
-# Tool-use Mechanistic Basis 项目评估
+# Tool-use Mechanistic Interpretability Project 评估报告
 
-## 一、Novelty（新颖性）评估
-
-### ✅ 核心亮点：方向正确，交叉点空白大
-
-这个项目的核心新颖性在于 **将 SAE-based MI 技术系统性地应用于 Agent 的工具调用决策机制**。根据最新文献调研（截至 2026 年 2 月）：
-
-| 维度 | 现有工作 | 本项目的增量 |
-|------|----------|-------------|
-| SAE 用于 LLM 解释 | Anthropic (2024), Google (Gemma Scope), SAELens 等 | ✅ 已有成熟方法论 |
-| Tool-calling 评测 | BFCL, When2Call (NAACL 2025), API-Bank | ✅ 可直接复用 |
-| MI 用于 Agent 行为 | 几乎空白 ⚠️ | 🆕 **核心创新点** |
-| SAE feature → decision-level 因果 | 零星工作（偏 token-level） | 🆕 **从 token 提升到 policy** |
-
-**最强卖点**：目前 MI 社区主要聚焦于理解 LLM 的"知识表征"和"推理电路"，而 **Agent 场景下的决策机制（尤其是 tool-call gating）** 几乎无人系统做过。这是一个明确的空白。
-
-### ⚠️ Novelty 风险
-
-1. **"发现和解释一些 feature"本身不够新**：SAE 找 feature 已经是标准操作。novelty 必须体现在 **decision-level 因果证据**（假设 3），而非仅仅 "我们发现了 gate feature"
-2. **方向 A（tool-use gating）相对窄**：只关注 "call vs no-call" 的二元决策，可能被 reviewer 认为场景过于简单。需要用 evidence accumulation（假设 2）和动态门控扩展来弥补
-3. **竞争窗口正在缩小**：SAE + Agent 的交叉方向关注度在 2025 下半年明显上升（Automated Interpretability Agent、MechSci 等）。**需要尽快出结果**
-
-### 📊 综合评分：**Novelty 7/10**
-
-方向很好，但需要实验结果足够"硬"（特别是因果干预部分）才能拉开差距。
+> 基于对 `question.md`、`Agent-Tool-Use-MI/docs/`、When2Call 数据文件及 BFCL 数据文件的实际检验。
+> 评估时间：2026-03-17
 
 ---
 
-## 二、Feasibility（可行性）评估
+## 一、关键发现（需立即处理）
 
-### ✅ 有利因素
+### 🔴 严重数据问题：When2Call 标签分布与代码均存在错误
 
-1. **代码框架完整**：已搭建 Agent Loop、SAE 模型、两阶段训练、分析流水线等核心模块（约 5000+ 行代码）
-2. **数据集可得**：When2Call（HuggingFace 公开）、BFCL（GitHub）、API-Bank（GitHub）
-3. **模型选择合理**：Llama-3-8B / Qwen-3 / Gemma-3 均为开源可 hook 模型
-4. **流式激活设计节省存储**：避免 160GB+ 的激活落盘问题
-5. **两阶段 SAE 训练**：Stage 1 通用语料预训练 + Stage 2 tool-use 微调，方法论上合理
+在实际读取数据文件后，发现以下与 `question.md` 描述**不符**的事实：
 
-### ⚠️ 可行性风险（按严重程度排序）
+| 数据文件 | 样本量 | 实际标签分布 |
+|----------|--------|-------------|
+| `when2call_train_sft.jsonl` | 15,000 | **全部 NO_CALL**（CALL = 0） |
+| `when2call_train_pref.jsonl` | 9,000 | CALL = 3,000 / NO_CALL = 6,000 |
 
-#### 🔴 高风险
+**解析**：
+- SFT 数据的助手回复全是直接回答或拒绝回复，**不含任何 `<TOOLCALL>` 标记**。
+- Preference 数据的 `chosen_response` 字段用 `<TOOLCALL>[...]</TOOLCALL>` 区分 CALL，CALL 样本仅 3,000 条。
+- `question.md` 中 "CALL:NO_CALL 平衡采样，有效样本约 12K × 2 = 24K" 的判断**完全不成立**。
 
-| # | 风险 | 影响 | 建议 |
-|---|------|------|------|
-| 1 | **Gate feature 不存在或不稀疏** | 整个假设链崩塌 | 先跑小规模验证（1k episodes），确认 AUROC > 0.7 再全面展开 |
-| 2 | **因果干预 flip rate 太低** | 论文最硬的部分没有结果 | 准备 fallback：即使 flip 不大，可以转向"gate 是连续信号而非开关"叙事 |
-| 3 | **算力不足** | 8B 模型 + 50k episodes + SAE 训练 需要大量 GPU 时间 | 估算：Llama-3-8B inference ≈ 16GB VRAM，50k episodes（单卡 A100）约 3-5 天 |
+**实际可用 CALL 样本**：最多 3,000（pref 数据的 chosen）。1:1 平衡后 Stage 2 实际训练规模约为 **6,000**，不是 24,000。
 
-#### 🟡 中风险
+### 🔴 适配器代码与数据格式不匹配
 
-| # | 风险 | 影响 | 建议 |
-|---|------|------|------|
-| 4 | **JSON 输出格式不稳定** | Decision boundary 被噪声污染 | 使用 structured generation（如 outlines / vLLM JSON mode）强制 JSON |
-| 5 | **When2Call 数据集规模/质量** | 训练数据不足或覆盖面窄 | 补充 synthetic generator；BFCL 做外部验证 |
-| 6 | **feature 是格式触发器而非语义 gate** | 发现的 "gate" 只是 JSON 格式特征 | 必须做 activation maximization + 语义验证来区分 |
-| 7 | **跨模型泛化性** | Llama 上的发现在 Qwen/Gemma 上不成立 | 至少做 2 个模型才有说服力 |
+`Agent-Tool-Use-MI/tasks/when2call_adapter.py` 中：
 
-#### 🟢 低风险
+```python
+should_call = raw_sample.get("should_call", raw_sample.get("label", None))
+```
 
-| # | 风险 | 影响 | 建议 |
-|---|------|------|------|
-| 8 | 工具名 label shortcut | feature 只是学到工具名 | 已在设计中考虑（工具名随机化） |
-| 9 | SAE 不收敛 | 需要调参迭代 | TopK SAE 通常比 L1 更稳定，两阶段训练也有帮助 |
+实际数据中**不存在** `should_call` 或 `label` 字段。数据格式为：
+```
+{"tools": [...], "messages": [{"role": "user", ...}, {"role": "assistant", "content": "..."}]}
+```
+（SFT）或：
+```
+{"tools": [...], "messages": [{"role": "user", ...}], "chosen_response": {...}, "rejected_response": {...}}
+```
+（Pref）
 
-### 📊 综合评分：**Feasibility 6.5/10**
+该适配器目前会将所有样本标记为 `UNCERTAIN`，无法正确提取标签。**Stage 2 训练依赖该适配器，必须先修复。**
 
-框架到位，但**核心假设是否成立取决于实验**——这正是研究的本质。主要顾虑在算力和结果不确定性。
+### 🟡 架构文档中模型名称不一致
 
----
+- `question.md`："目标模型：Qwen3.5-4B/9B"
+- `architecture.md` 运行命令：`--model meta-llama/Llama-3-8B-Instruct`
+- `mission.md`："下载模型：Llama-3-8B / Qwen3-8B / Gemma3-4B"
 
-## 三、执行过程中可能遇到的具体问题
-
-### 1. 🔧 工程问题
-
-**（a）模型加载与 Hook 兼容性**
-- 不同模型（Llama / Qwen / Gemma）的层结构和残差流位置**不统一**
-- `ActivationCache` 中的 hook 注册代码假设了特定模型结构，切换模型时大概率需要修改
-- **建议**：用 `model.config` 动态获取层数和隐藏维度，而非硬编码
-
-**（b）流式训练的内存管理**
-- `ActivationBuffer` 在内存中积累激活，如果 buffer_size 设太大或模型 hidden_dim 很高，可能 OOM
-- 估算：buffer_size=8192, hidden_dim=4096, float32 → 约 128MB/layer
-- 多层同时缓存时需注意内存压力
-
-**（c）JSON 输出解析失败**
-- 开源模型（尤其未微调版本）生成 JSON 的能力参差不齐
-- `output_parser.py` 需要鲁棒的 fallback 机制（正则匹配、部分解析等）
-- Base model（未 tool-tuned）几乎一定会在 JSON 格式上频繁出错
-
-### 2. 📊 实验设计问题
-
-**（a）CALL vs NO_CALL 样本平衡**
-- When2Call 原始数据的 CALL:NO_CALL 比例可能不是 1:1
-- 如果不平衡，SAE 学到的 feature 可能偏向多数类
-- 代码中的 `ActivationBuffer.balance=True` 是对的，但需要确认在 Stage 1 预训练时不应该做平衡
-
-**（b）"Action boundary window" 定义的敏感性**
-- W_pre=20 tokens、W_post=10 tokens 的窗口大小是经验值
-- 不同的窗口大小可能显著影响结果
-- **建议**：作为 ablation 实验的一个维度
-
-**（c）层选择**
-- 默认选 Layer 24, 27（基于 32 层 Llama-3-8B 的 3/4 和 5/6 位置）
-- 但 Qwen-3-8B 和 Gemma-3-4B 层数不同，hook 层需要相应调整
-- 最好做一个 layer sweep 实验来确认最优层
-
-### 3. 📈 结果不如预期时的应对
-
-**（a）如果 gate feature 可分离性低（AUROC < 0.65）**
-- 可能原因：决策信息分散在很多 feature 上（非稀疏）
-- 应对：增大 SAE dictionary size、尝试不同层、或换成 phase-wise SAE
-
-**（b）如果因果干预效果微弱**
-- 可能原因：tool-call 决策是多个 feature 联合决定的
-- 应对：改做 **多 feature 联合 steering**，而非单 feature 干预
-- 或者转向"连续积累"叙事：展示 feature 强度与 P(CALL) 的连续相关性
-
-**（c）如果 base vs tool-tuned 没有差异**
-- 可能原因：base model 就已经有 gate feature（来自预训练 JSON 数据）
-- 这其实也是一个有趣的 finding，可以卖成 "tool-call gating 是 emergent 的"
-
-### 4. ⏱️ 时间线风险
-
-根据 `mission.md` 估算的 5-8 周偏乐观：
-
-| 阶段 | 估算 | 实际风险 |
-|------|------|----------|
-| 环境 + 数据准备 | 3-5 天 | ⚠️ 模型下载可能很慢；When2Call 数据格式需要适配 |
-| Agent 闭环调通 | 5-7 天 | ⚠️ JSON 输出不稳定可能消耗大量 debug 时间 |
-| Rollout 生成 | 3-5 天 | ⚠️ 取决于 GPU 数量和模型推理速度 |
-| SAE 两阶段训练 | 5-7 天 | ⚠️ Stage 1 需要 50M tokens，可能需要多次调参 |
-| 分析与干预 | 5-10 天 | ⚠️ 如果结果不理想需要反复迭代 |
-| **总计** | **3-5 周**（理想） | **6-10 周**（现实） |
+SAE 层选择（Layer 24, 27）对应 32 层 Llama-3-8B，**不适用于 Qwen3-4B（28 层）或 9B（36 层）**。需要为每个目标模型单独确认激活提取层。
 
 ---
 
-## 四、总结与建议
+## 二、回答 question.md 中的四个具体问题
 
-### 🎯 值得做吗？
+### 问题 1：Stage 2 数据集组合策略
 
-**值得，但需要策略性执行。** 方向的新颖性和时效性都很好，关键在于：
+**结论：方案 A（仅 When2Call）是正确方向，但需使用正确数据子集。**
 
-1. **尽早验证核心假设**：用 1k episodes + 1 层 SAE 做快速验证，确认 gate feature 存在性
-2. **把因果干预做扎实**：这是论文的 "evidence grade" 决定因素
-3. **准备多种叙事**：如果二元 gating 不明显，转向连续积累叙事
-4. **控制范围**：先做 1 个模型 + 1 个数据集出核心结果，再扩展
-5. **时间紧迫**：这个交叉方向的竞争窗口在缩小，建议 **3 个月内** 完成初稿
+现有情况下三个方案的实际可行性：
 
-### 🏆 最终投稿建议
+| 方案 | 实际有效 CALL 样本 | 实际有效 NO_CALL 样本 | 1:1 后规模 | 可行性 |
+|------|-------------------|----------------------|------------|--------|
+| A：仅 When2Call (Pref) | 3,000 | 3,000（从 6K 采样） | ~6K | ✅ 可行，但规模偏小 |
+| B：When2Call + BFCL | 3,000 + 2,000+ CALL | 3,000 + 1,124 NO_CALL | ~8K | ✅ 有增益，但标签噪声增加 |
+| C：When2Call + Tau²轨迹 | 3,000 | 3,000 | 6K + 轨迹片段 | ⚠️ 后处理成本高，优先级低 |
 
-- **目标会议**：ICML / NeurIPS / ICLR（MI workshop 作为备选）
-- **论文卖点不要是** "我们发现了几个 feature"
-- **论文卖点应该是** "我们首次为 Agent 工具调用决策提供了 mechanistic 解释，并通过 feature-level causal intervention 证明了这些内部表征的因果效力"
+**推荐方案（修订版 A+B）**：
+1. 从 `when2call_train_pref.jsonl` 中提取 3,000 CALL + 3,000 NO_CALL 样本（1:1）
+2. 将 BFCL `BFCL_v4_irrelevance.json`（240）+ `BFCL_v4_live_irrelevance.json`（884）合并补充 NO_CALL（共约 1,124 条）
+3. 将 BFCL `BFCL_v4_simple_python.json`（400）+ `BFCL_v4_live_simple.json`（258）等补充 CALL
+4. **不要使用** `when2call_train_sft.jsonl`（全是 NO_CALL，且格式不适合提取 CALL/NO_CALL 对比）
+
+总有效 Stage 2 数据约 **8,000–10,000 样本**。
+
+### 问题 2：BFCL NO_CALL 标签提取
+
+**实际数量**（已核实）：
+
+| 文件 | 样本量 | 说明 |
+|------|--------|------|
+| `BFCL_v4_irrelevance.json` | 240 | 干净的 NO_CALL |
+| `BFCL_v4_live_irrelevance.json` | 884 | 真实用户提问 NO_CALL |
+| **合计** | **1,124** | 可直接使用，无需清洗 |
+
+BFCL v4 Irrelevance 样本质量较高（测试集设计），但总量有限，仅能作为补充，不能替代 When2Call Pref 作为主数据。BFCL CALL 样本（Simple/Multiple/Parallel 等）**均为评测集设计**，没有 CALL/NO_CALL 的配对标签，引入会增加决策边界噪声。
+
+**建议**：Irrelevance 数据与 When2Call pref 的 CALL 样本配对（1:1），BFCL CALL 类别谨慎使用。
+
+### 问题 3：多步轨迹对 Evidence Accumulation 验证的必要性
+
+**是必要的，但 Fig 2 设计需要调整。**
+
+`architecture.md` 将 Fig 2 定义为"gate feature 随 agent step 演化的主图"并放在 Introduction 作为 teaser。然而：
+
+- When2Call 是**单轮决策数据**，没有 step 序列
+- Tau²-Bench 的多步轨迹**没有逐步 CALL/NO_CALL 标注**
+- VitaBench 样本量太少（400 任务）
+
+**实用替代方案**：
+1. **伪多步序列**：将 When2Call 的多个 pref 样本串联，构造"证据逐步给出 → 模型逐步倾向 CALL"的情境。这是一种受控实验，叙事可行但需注意不是真实 agent 轨迹。
+2. **利用 sandbox 工具生成真实轨迹**：用 `agent_loop.py` + sandbox tools 跑 When2Call 题目，记录多步决策序列。这是最干净的做法，但需要 agent 闭环先跑通。
+3. **降低 Fig 2 地位**：将 Evidence Accumulation 从"首要贡献"降为"扩展实验"，主论文先聚焦 H1（gate 存在性）和 H3（因果干预）。
+
+**优先建议**：先跑 H1+H3，用方案 1（伪多步序列）做 H2 的 pilot 结果，后续再用方案 2 强化。
+
+### 问题 4：24K（实为 6K）样本对 SAE Stage 2 的充分性
+
+**结论：6K 样本对 TopK SAE 的 Stage 2 微调是不足但可接受的起点，需策略性处理。**
+
+参考 SAE 训练规模文献：
+
+| 项目 | 训练激活数 | SAE 字典大小 | 场景 |
+|------|-----------|-------------|------|
+| Anthropic Scaling SAEs (2024) | 数亿 tokens | 32K–1M | 通用语言理解 |
+| Gemma Scope (2024) | 数十亿 tokens | 16K–1M | 通用 |
+| 本项目 Stage 2 | 约 6K 样本 × ~20 tokens = **~120K tokens** | 32,768 | Tool-use 微调 |
+
+120K tokens 对于从头训练 SAE 远远不够，但两阶段训练设计部分缓解了这个问题：
+
+- Stage 1 用 50M tokens 的 OpenWebText2 建立通用字典初始化 ✅
+- Stage 2 只是在此基础上做**领域微调**，类似 fine-tuning
+- 类似的 "SAE fine-tuning" 工作表明少量领域数据（10K–50K 激活）也能有效偏移 feature 分布
+
+**风险与建议**：
+- 如果 Stage 2 过拟合（training loss 下降但 CALL/NO_CALL AUROC 不稳定），考虑**更小学习率**（1e-5 而非 5e-5）或**早停**
+- 考虑只更新 decoder 权重，冻结 encoder（减少参数，防过拟合）
+- Ablation：对比 Stage 1-only SAE vs Stage 2 SAE 的 AUROC，量化 Stage 2 的贡献
+
+---
+
+## 三、架构与代码质量评估
+
+### 代码框架完整性
+
+| 模块 | 状态 | 关键问题 |
+|------|------|---------|
+| `tasks/when2call_adapter.py` | ⚠️ 存在 bug | 字段名错误（`should_call` 不存在）；需改为解析 `chosen_response` 中的 `<TOOLCALL>` |
+| `tasks/bfcl_adapter.py` | 未验证 | 需确认是否适配 v4 格式 |
+| `sae/train_sae.py` | ✅ 基本合理 | 流式 prefetch 设计好；bfloat16 节省显存 |
+| `sae/sae_model.py` | 未读，待验证 | - |
+| `analysis/correlation_analysis.py` | 未读，待验证 | - |
+| `analysis/steering.py` | 未读，待验证 | - |
+| `run/cache_activations.py` | 未读，待验证 | - |
+
+### 架构设计亮点
+
+1. **流式激活处理**：不落盘设计节省约 160GB 存储，工程上合理
+2. **两阶段训练**：Stage 1 通用预训练 + Stage 2 领域微调，是比直接在 tool-use 数据上从头训练更稳健的方法
+3. **预分配缓冲区 `_PendingBuffer`**：避免频繁 `torch.cat`，内存效率好
+4. **后台预取 `_prefetch_generator`**：推理/训练可并行，减少 GPU 空闲时间
+
+### 架构设计风险
+
+1. **hardcoded 层号**：`--layers 24 27` 在文档中为常量，切换到 Qwen/Gemma 时会出错
+2. **SFT 数据被误用**：当前架构文档提到 "When2Call / BFCL 任务的 action boundary 激活" 但未区分 SFT（全 NO_CALL）与 pref（含 CALL）格式差异
+3. **action boundary 的实际定义**：`W_pre`（输出 TOOLCALL 前 N token）在 pref 数据中可以定义，但在 SFT 数据中由于全是 NO_CALL，boundary 意义不同
+4. **`<TOOLCALL>` 标记解析**：需要确认 Qwen3.5 在推理时使用的是哪种 tool call 格式（OpenAI schema vs `<TOOLCALL>` 文本标记），两者不同
+
+---
+
+## 四、三个核心假设的可验证性评估
+
+### H1：Tool-call Gating（门控存在性）
+
+**可验证性：高** ✅
+
+- 数据：When2Call pref 的 CALL/NO_CALL 对是干净的二元标签
+- 方法：AUROC + 线性探针已实现于 `analysis/correlation_analysis.py` 和 `analysis/linear_probe.py`
+- 风险：CALL 样本仅 3,000，特征估计可能不稳定，建议用 bootstrap CI 量化不确定性
+
+**预期结果范围**：如果存在 gate feature，AUROC 应 > 0.75（少量高 AUROC feature）；如果 < 0.65，可能需要换层或增大 dictionary_size。
+
+### H2：Evidence Accumulation（证据积累）
+
+**可验证性：中等** ⚠️
+
+- 数据：When2Call 单轮，无法直接验证跨 step 演化
+- 替代设计：用伪多步序列或 sandbox 生成的真实轨迹
+- 这是三个假设中**实验设计最弱**的一个，建议论文中降级为 exploratory finding
+
+### H3：Causal Controllability（因果可控性）
+
+**可验证性：中等** ⚠️
+
+- 方法已实现于 `analysis/steering.py`
+- 关键挑战：Qwen3.5 的 thinking 模式（`<think>...</think>`）可能干扰 tool-call decision 测量
+- 建议：使用 non-thinking 模式（`--thinking_budget 0`）确保决策边界干净
+- flip rate 目标：在不破坏语言质量（perplexity 变化 < 20%）的前提下 flip rate > 20%
+
+---
+
+## 五、综合评分与优先行动项
+
+### 整体评分
+
+| 维度 | 评分 | 说明 |
+|------|------|------|
+| 研究方向新颖性 | 8/10 | MI × Agent tool-use 交叉，空白明显 |
+| 实验设计完整性 | 6/10 | 三假设体系合理，但 H2 数据支撑弱 |
+| 代码框架质量 | 7/10 | 流式设计好，但 adapter 有严重 bug |
+| 数据准备充分性 | 4/10 | 标签分布问题严重，远少于预期 |
+| 执行可行性 | 6/10 | 核心假设能验证，但 6K 数据规模有限 |
+
+### 优先行动项（按紧迫性排序）
+
+**必须立即处理：**
+
+1. **修复 `when2call_adapter.py`**：改为从 `when2call_train_pref.jsonl` 的 `chosen_response` 字段提取标签（`<TOOLCALL>` → CALL，否则 → NO_CALL），废弃对 SFT 数据的直接使用
+2. **确认目标模型**：统一为 Qwen3.5-4B/9B，更新 `architecture.md` 中的命令行，并对该模型做层 sweep（推荐从 layer 16/21 开始，对应 4B 的 3/4 和 5/6 位置）
+3. **端到端数据管线验证**：在 100 个 pref 样本上跑完从 "适配器加载 → 激活提取 → SAE 更新" 的完整流程，确认无 bug 再扩大规模
+
+**短期（1 周内）：**
+
+4. **数据增补方案**：考虑用 `synthetic_generator.py` 合成额外的 CALL/NO_CALL 对，或从 BFCL Irrelevance（1,124 条）补充 NO_CALL，将有效训练集从 6K 扩大到 10K+
+5. **快速验证 H1**：仅用 pref 数据中 500 CALL + 500 NO_CALL，训练 SAE Stage 2，计算 top feature AUROC。如果 AUROC > 0.7，说明假设方向正确，继续全面展开
+
+**中期（2–4 周）：**
+
+6. **H3 因果干预实验**：在 H1 验证后，用 `steering.py` 跑 flip rate vs α 曲线（先单特征，再多特征联合）
+7. **H2 替代方案**：用 sandbox 生成 50–100 个真实多步 agent 轨迹，追踪 gate feature 随 step 演化（可作为论文 Fig 2 的素材）
+8. **模型一致性**：确认 Qwen3.5 是否需要关闭 thinking 模式，确保 decision boundary 干净
+
+---
+
+## 六、关于 Stage 2 数据集的最终方案建议
+
+综合以上分析，Stage 2 推荐方案如下：
+
+**数据来源**：
+- 主体：`when2call_train_pref.jsonl` 中 CALL = 3,000 + NO_CALL = 3,000（从 6K 中随机采样，1:1 平衡）
+- 补充 NO_CALL：BFCL `BFCL_v4_irrelevance.json`（240）+ `BFCL_v4_live_irrelevance.json`（884）= 1,124 条
+- 可选合成：`synthetic_generator.py` 额外生成 2,000 CALL/NO_CALL 对（控制难度梯度）
+
+**数据格式**：
+- CALL 标签：`chosen_response.content` 包含 `<TOOLCALL>` 的样本
+- NO_CALL 标签：`chosen_response.content` 为纯文本回复的样本
+- 激活提取位置：`chosen_response` 序列末尾（决策边界）的残差流
+
+**不使用**：
+- `when2call_train_sft.jsonl`：全为 NO_CALL，格式不适合提取 action boundary 对比激活
+- BFCL Simple/Multiple/Parallel 系列：无 NO_CALL 配对，引入不需要的多任务噪声
+- Tau²-Bench / VitaBench：标注粒度不足，后处理成本过高
+
+**预期有效 Stage 2 数据规模**：约 8,000–10,000 样本（含合成部分），对应约 160K–200K tokens 激活。在两阶段训练框架下，这对特征微调是可接受的起点，建议配合早停和较小学习率（1e-5）使用。
+
+---
+
+*本评估基于对实际数据文件的统计分析和代码检查，主要关注数据质量、代码正确性及实验设计可行性。研究方向本身的学术价值评估见 `Agent-Tool-Use-MI/docs/assessment.md`。*
