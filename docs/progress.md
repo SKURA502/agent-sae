@@ -3,7 +3,6 @@
 ## 当前状态（2026-03-18）
 
 ### 代码
-- [x] 数据分析完成：标签分布已核实
 - [x] `run/when2call_adapter.py`：从 `chosen_response` 解析 `<TOOLCALL>` 标签（pref）；SFT 分割兜底 NO_CALL；MCQ `request_for_info` 返回 UNCERTAIN 供调用方过滤
 - [x] SAE 两阶段训练搭建完成
 - [x] **H1 特征发现**：`analysis/feature_discovery.py`——mean_diff + per-feature AUROC，输出 top-K JSON + 分布直方图（Fig 1a）
@@ -52,7 +51,7 @@
 
 ## 实验优先级：H1 → H3 → H2
 
-H1 和 H3 只依赖静态有标签数据（When2Call Pref + test MCQ），冒烟测试通过后即可推进。H2 需要 agent loop 完整跑通后才能生成 sandbox rollout。
+H1 和 H3 只依赖静态有标签数据（When2Call Pref + test MCQ）。H2 需要 agent loop 完整跑通后才能生成 sandbox rollout。
 
 ---
 
