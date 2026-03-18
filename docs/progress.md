@@ -13,7 +13,7 @@
 - [x] **H2 轨迹分析**：`analysis/trajectory_analysis.py`——CALL vs NO_CALL episode 的 feature 强度轨迹，Fig 3
 - [x] `scripts/run_pipeline.sh` 补全 Step 3b–7（特征发现 → 线性探针 → steering → H2 rollout + 轨迹分析）
 - [ ] 端到端流水线未测试（待 SAE 训练完成后）
-- [ ] README.md 缺失
+- [x] `README.md` 已补全
 
 ### 数据
 - [x] When2Call Pref 已确认：3K CALL + 6K NO_CALL（共 9K），用于 Stage 2 训练 + 特征发现
