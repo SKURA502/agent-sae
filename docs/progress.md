@@ -6,8 +6,8 @@
 - [x] 数据分析完成：标签分布已核实
 - [x] `tasks/when2call_adapter.py`：从 `chosen_response` 解析 `<TOOLCALL>` 标签（pref）；SFT 分割兜底 NO_CALL；MCQ `request_for_info` 返回 UNCERTAIN 供调用方过滤
 - [x] SAE 两阶段训练搭建完成
-- [ ] controller 未搭建；agent loop 的 sandbox rollout 未搭建
 - [ ] 特征发现、相关性分析、steering/ablation 实验脚本未搭建
+- [ ] controller 未搭建；agent loop 的 sandbox rollout 未搭建
 - [ ] main() 函数未搭建，run_pipeline.sh 不完整
 - [ ] 端到端流水线未测试
 - [ ] README.md 缺失
