@@ -10,9 +10,8 @@ SAE Module - Sparse Autoencoder 训练和分析
 """
 
 from .sae_model import TopKSAE, SAEConfig
-from .train_sae import SAETrainer, TrainingConfig, TwoStageTrainer
-from .feature_extraction import FeatureExtractor
-from .interp import ContextCollector, FeatureInterpreter
+from .train_sae import SAETrainer, TrainingConfig
+from .interp_sae import ContextCollector, FeatureInterpreter
 from .pretrain_data import (
     PretrainConfig,
     ActivationStreamer,
@@ -28,9 +27,6 @@ __all__ = [
     # 训练器
     "SAETrainer",
     "TrainingConfig",
-    "TwoStageTrainer",
-    # 特征提取
-    "FeatureExtractor",
     # 特征解释
     "ContextCollector",
     "FeatureInterpreter",
