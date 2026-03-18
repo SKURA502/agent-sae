@@ -10,8 +10,9 @@ import sys
 import yaml
 from pathlib import Path
 
-from run import RolloutGenerator, When2CallAdapter
+from run import RolloutGenerator
 from analysis import CorrelationAnalyzer, LinearProbe, Visualizer
+from utils import add_dataset_args, load_samples
 
 
 def load_model_config(config_path: str) -> dict:
@@ -53,13 +54,7 @@ def cmd_generate_rollouts(args):
         dtype=args.dtype,
     )
     
-    # 加载数据集
-    adapter = When2CallAdapter(
-        args.data_path or "./data/raw/When2Call/data/test",
-        split=args.split or "test_mcq",
-    )
-    adapter.load()
-    samples = list(adapter)[:args.num_samples]
+    samples = load_samples(args.dataset, args.data_path, args.num_samples, split=args.split)
     
     generator.run(samples, experiment_name=args.experiment_name)
 
@@ -124,18 +119,10 @@ def main():
     p_rollout.add_argument("--model-config", type=str,
                           default=str(Path(__file__).parent / "configs" / "model_config.yaml"),
                           help="Path to model_config.yaml")
-    p_rollout.add_argument("--dataset", type=str, default="when2call",
-                          choices=["when2call"])
-    p_rollout.add_argument("--data-path", type=str, default=None,
-                          help="Dataset root path for when2call/bfcl")
-    p_rollout.add_argument("--split", type=str, default="test",
-                          help="Dataset split for adapters")
-    p_rollout.add_argument("--num-samples", type=int, default=1000)
+    add_dataset_args(p_rollout)
     p_rollout.add_argument("--layers", type=int, nargs="+", default=[24, 27],
                           help="Hook layers")
     p_rollout.add_argument("--experiment-name", type=str, default="rollout")
-    p_rollout.add_argument("--seed", type=int, default=None,
-                          help="Synthetic generator seed")
     p_rollout.add_argument("--output-dir", type=str, default="./outputs/rollouts")
     p_rollout.add_argument("--device", type=str, default="cuda")
     p_rollout.add_argument("--dtype", type=str, default="bfloat16")
