@@ -7,8 +7,8 @@ current_model: "qwen3.5-4b"
 # 模型配置
 models:
   qwen3.5-4b:
-    name: "Qwen/Qwen3.5-4B-Instruct"
-    local_path: "/data/models/Qwen3.5-4B-Instruct"
+    name: "Qwen/Qwen3.5-4B"
+    local_path: "/data/models/Qwen3.5-4B"
     hidden_size: 2560
     num_layers: 32
     # Hook 层位置：int(32 * 3/4) = 24，int(32 * 5/6) = 26
@@ -19,20 +19,12 @@ models:
     is_tool_tuned: true
 
   qwen3.5-9b:
-    name: "Qwen/Qwen3.5-9B-Instruct"
-    local_path: "/data/models/Qwen3.5-9B-Instruct"
+    name: "Qwen/Qwen3.5-9B"
+    local_path: "/data/models/Qwen3.5-9B"
     hidden_size: 4096
     num_layers: 32
     hook_layers: [24, 26]
     # dict_size = 32768, k = 128
-    is_tool_tuned: true
-
-  llama3-8b:
-    name: "meta-llama/Llama-3.1-8B-Instruct"
-    local_path: "/data/models/Llama-3.1-8B-Instruct"
-    hidden_size: 4096
-    num_layers: 32
-    hook_layers: [24, 26]
     is_tool_tuned: true
 
 # 推理配置

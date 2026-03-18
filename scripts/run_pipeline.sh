@@ -9,16 +9,15 @@ DEVICE="${DEVICE:-cuda}"
 DTYPE="${DTYPE:-bfloat16}"
 
 PRETRAIN_DIR="$DATA_BASE/pretrain"
-TOOLUSE_DIR="$DATA_BASE/tooluse"
-WHEN2CALL_DIR="$DATA_BASE/when2call"
-BFCL_DIR="$DATA_BASE/bfcl"
+WHEN2CALL_TRAIN="$DATA_BASE/When2Call/data/train"
+WHEN2CALL_TEST="$DATA_BASE/When2Call/data/test"
 
 STAGE1_TARGET_TOKENS=50000000   # 50M tokens
-STAGE2_TARGET_TOKENS=10000000   # ~10M tokens（When2Call Pref 全量对话文本）
+STAGE2_TARGET_TOKENS=5000000    # ~5M tokens（When2Call pref+sft 全量约一轮）
 STAGE2_LR=5e-4
 STAGE2_BATCH=4096
 
-LAYERS="24 26"                  # 两个 hook 层
+LAYERS="24 26"
 
 echo "================================================================"
 echo "Agent-Tool-Use-MI Pipeline"
@@ -49,8 +48,8 @@ done
 echo "  Stage 1 checkpoints:"
 find "$OUTPUT_BASE/sae_checkpoints/stage1" -name "*-stage1.pt" 2>/dev/null | sort
 
-# ── Step 2：Stage 2 SAE 训练（When2Call 工具调用对话文本，全 token 流式）──
-echo "▶ Step 2: SAE Stage 2 training (tool-use JSONL, full-text streaming, ${STAGE2_TARGET_TOKENS} tokens)"
+# ── Step 2：Stage 2 SAE 训练（When2Call pref+sft，action boundary streaming）─
+echo "▶ Step 2: SAE Stage 2 training (When2Call pref+sft, ${STAGE2_TARGET_TOKENS} tokens)"
 
 for LAYER in $LAYERS; do
   echo "  Layer $LAYER ..."
@@ -60,7 +59,7 @@ for LAYER in $LAYERS; do
   python -m sae.train_sae stage2 \
     --model "$MODEL_PATH" \
     --layer "$LAYER" \
-    --data-dir "$TOOLUSE_DIR" \
+    --data-dir "$WHEN2CALL_TRAIN" \
     --stage1-checkpoint "$S1_CKPT" \
     --output-dir "$OUTPUT_BASE/sae_checkpoints" \
     --target-tokens $STAGE2_TARGET_TOKENS \
@@ -74,43 +73,28 @@ done
 echo "  Stage 2 checkpoints:"
 find "$OUTPUT_BASE/sae_checkpoints/stage2" -name "*-stage2.pt" 2>/dev/null | sort
 
-# ── Step 3：提取测试集激活（H1 主测：When2Call MCQ 二类子集）────
-echo "▶ Step 3: Extract activations — When2Call MCQ (H1 主测)"
+# ── Step 3：提取测试集激活（H1/H3：When2Call MCQ 二类子集）───────
+echo "▶ Step 3: Extract activations — When2Call MCQ (H1/H3)"
 
 python -m run.cache_activations extract \
   --model "$MODEL_PATH" \
   --dataset when2call \
-  --data-path "$WHEN2CALL_DIR" \
+  --data-path "$WHEN2CALL_TEST" \
   --split test_mcq \
   --num-samples -1 \
   --layers $LAYERS \
   --output-dir "$OUTPUT_BASE/activations/when2call_mcq" \
+  --hook-position last \
   --device "$DEVICE" \
   --dtype "$DTYPE"
 
-# ── Step 4：提取泛化测试集激活（BFCL Irrelevance + Simple）───────
-echo "▶ Step 4: Extract activations — BFCL generalization (H1 泛化)"
-
-python -m run.cache_activations extract \
-  --model "$MODEL_PATH" \
-  --dataset bfcl \
-  --data-path "$BFCL_DIR" \
-  --num-samples -1 \
-  --layers $LAYERS \
-  --output-dir "$OUTPUT_BASE/activations/bfcl_gen" \
-  --device "$DEVICE" \
-  --dtype "$DTYPE"
-
-# ── Step 5：特征发现与线性探针（H1）─────────────────────────────
-echo "▶ Step 5: H1 — Correlation analysis + Linear probe"
+# ── Step 4：特征发现（H1）────────────────────────────────────────
+echo "▶ Step 4: H1 — Feature discovery (mean activation diff) + Linear probe"
 
 for LAYER in $LAYERS; do
-  # 找到对应 Stage 2 checkpoint
   SAE_PATH=$(python -c "
 from pathlib import Path
 matches = sorted(Path('$OUTPUT_BASE/sae_checkpoints/stage2').glob('*-L${LAYER}-*-stage2.pt'))
-if not matches:
-    matches = sorted(Path('$OUTPUT_BASE/sae_checkpoints/stage2').glob('*-layer${LAYER}-*-stage2.pt'))
 print(matches[0] if matches else '')
 ")
   if [[ -z "$SAE_PATH" ]]; then
@@ -120,7 +104,6 @@ print(matches[0] if matches else '')
 
   echo "  Layer $LAYER, SAE: $SAE_PATH"
 
-  # 相关性分析
   python -m analysis.correlation_analysis \
     --sae-path "$SAE_PATH" \
     --data-path "$OUTPUT_BASE/activations/when2call_mcq/layer_${LAYER}_activations.pt" \
@@ -128,32 +111,21 @@ print(matches[0] if matches else '')
     --output-dir "$OUTPUT_BASE/analysis/layer_${LAYER}/when2call_mcq" \
     --device "$DEVICE"
 
-  # 线性探针
   python -m analysis.linear_probe \
     --sae-path "$SAE_PATH" \
     --data-path "$OUTPUT_BASE/activations/when2call_mcq/layer_${LAYER}_activations.pt" \
     --layer "$LAYER" \
     --output-dir "$OUTPUT_BASE/analysis/layer_${LAYER}/when2call_mcq" \
     --device "$DEVICE"
-
-  # BFCL 泛化验证
-  python -m analysis.correlation_analysis \
-    --sae-path "$SAE_PATH" \
-    --data-path "$OUTPUT_BASE/activations/bfcl_gen/layer_${LAYER}_activations.pt" \
-    --layer "$LAYER" \
-    --output-dir "$OUTPUT_BASE/analysis/layer_${LAYER}/bfcl_gen" \
-    --device "$DEVICE"
 done
 
-# ── Step 6：Steering 实验（H3）───────────────────────────────────
-echo "▶ Step 6: H3 — Steering / Ablation"
+# ── Step 5：Steering 实验（H3）───────────────────────────────────
+echo "▶ Step 5: H3 — Steering / Ablation"
 
 for LAYER in $LAYERS; do
   SAE_PATH=$(python -c "
 from pathlib import Path
 matches = sorted(Path('$OUTPUT_BASE/sae_checkpoints/stage2').glob('*-L${LAYER}-*-stage2.pt'))
-if not matches:
-    matches = sorted(Path('$OUTPUT_BASE/sae_checkpoints/stage2').glob('*-layer${LAYER}-*-stage2.pt'))
 print(matches[0] if matches else '')
 ")
   if [[ -z "$SAE_PATH" ]]; then
@@ -161,7 +133,6 @@ print(matches[0] if matches else '')
     continue
   fi
 
-  # 从分析结果取 top-5 CALL 门控特征
   TOP_FEATURES=$(python -c "
 import json
 from pathlib import Path
@@ -183,11 +154,9 @@ else:
 import sys, torch
 sys.path.insert(0, '.')
 from analysis import SteeringExperiment
-from tasks import When2CallAdapter
+from run.when2call_adapter import When2CallAdapter, DecisionLabel
 
-# 加载 MCQ 二类子集作为 steering 测试集（排除 request_for_info）
-from tasks.base_adapter import DecisionLabel
-adapter = When2CallAdapter('$WHEN2CALL_DIR', split='test_mcq')
+adapter = When2CallAdapter('$WHEN2CALL_TEST', split='test_mcq')
 adapter.load()
 samples = [s for s in adapter if s.label in (DecisionLabel.CALL, DecisionLabel.NO_CALL)][:200]
 prompts = [s.instruction for s in samples]

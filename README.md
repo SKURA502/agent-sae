@@ -18,18 +18,21 @@ See [docs/goal.md](docs/goal.md) for the full research design.
 Agent-Tool-Use-MI/
 ├── configs/            # model_config.yaml (stable model metadata)
 ├── controller/         # agent loop, tool schema, sandbox tools
-├── tasks/              # dataset adapters: When2Call, BFCL, synthetic
-├── run/                # activation extraction for analysis
+├── run/                # When2Call adapter, Stage 2 data iterator,
+│                       # activation extraction, rollout generation
 ├── sae/                # two-stage SAE training, feature extraction
 ├── analysis/           # correlation, linear probe, steering, visualization
-├── scripts/            # pipeline scripts, quick test
+├── scripts/            # pipeline script, quick test
 ├── data/               # raw datasets (not committed)
+│   └── raw/When2Call/data/
+│       ├── train/      # when2call_train_pref.jsonl, when2call_train_sft.jsonl
+│       └── test/       # when2call_test_mcq.jsonl
 └── outputs/            # checkpoints, activations, analysis results
 ```
 
 ## Model
 
-Primary: **Qwen3.5-4B-Instruct** (`hidden_size=2560, num_layers=32`)
+Primary: **Qwen3.5-4B** (`hidden_size=2560, num_layers=32`)
 
 Hook layers: `L24` (`int(32×3/4)`) and `L26` (`int(32×5/6)`)
 
@@ -39,15 +42,14 @@ SAE: `dict_size = hidden_size × 8 = 20480`, `k = hidden_size // 32 = 80`
 
 | File | Size | Label | Use |
 |------|------|-------|-----|
-| `when2call_train_pref.jsonl` | 9K | 3K CALL + 6K NO_CALL | SAE Stage 2 training |
-| `when2call_test_mcq.jsonl` | 3,652 | tool_call / cannot_answer / request_for_info | H1/H3 evaluation |
-| `BFCL_v4_irrelevance.json` | 240 | NO_CALL | H1 generalization |
-| `BFCL_v4_live_irrelevance.json` | 884 | NO_CALL | H1 generalization |
-| `BFCL_v4_simple_python.json` | 400 | CALL | H1 generalization |
-| `BFCL_v4_live_simple.json` | 258 | CALL | H1 generalization |
+| `when2call_train_pref.jsonl` | 9K | 3K CALL + 6K NO_CALL | SAE Stage 2 training + feature discovery |
+| `when2call_train_sft.jsonl` | 15K | all NO_CALL | SAE Stage 2 training |
+| `when2call_test_mcq.jsonl` | 3,652 | 1,295 tool_call / 1,295 cannot_answer / 1,062 request_for_info | H1/H3 evaluation only |
 
-When2Call label parsing: `chosen_response.content` containing `<TOOLCALL>` → CALL, otherwise NO_CALL.
-MCQ evaluation uses binary subset only (tool_call vs cannot_answer, 2,590 samples; request_for_info excluded).
+Training/test split: the entire `test_mcq` file (including `request_for_info`) is excluded from Stage 2 training and feature discovery.
+H1/H3 evaluation uses the binary subset only (tool_call vs cannot_answer, 2,590 samples).
+
+Feature discovery uses mean activation difference: `E[f|CALL] − E[f|NO_CALL]` over the pref split, no sampling required.
 
 ## Installation
 
@@ -57,17 +59,11 @@ pip install -r requirements.txt
 
 ## Quick Start
 
-### Smoke test (no GPU required)
-
-```bash
-python scripts/quick_test.py
-```
-
 ### Stage 1 SAE training (OpenWebText2, 50M tokens)
 
 ```bash
 python -m sae.train_sae stage1 \
-  --model Qwen/Qwen3.5-4B-Instruct \
+  --model Qwen/Qwen3.5-4B \
   --layer 24 \
   --target-tokens 50000000 \
   --data-dir ./data/raw/pretrain \
@@ -77,15 +73,15 @@ python -m sae.train_sae stage1 \
 
 Repeat for `--layer 26`.
 
-### Stage 2 SAE training (tool-use JSONL, full-text streaming)
+### Stage 2 SAE training (When2Call pref + sft, action-boundary activations)
 
 ```bash
 python -m sae.train_sae stage2 \
-  --model Qwen/Qwen3.5-4B-Instruct \
+  --model Qwen/Qwen3.5-4B \
   --layer 24 \
-  --data-dir ./data/raw/tooluse \
+  --data-dir ./data/raw/When2Call/data/train \
   --stage1-checkpoint ./outputs/sae_checkpoints/stage1/<ckpt>.pt \
-  --target-tokens 10000000 \
+  --target-tokens 5000000 \
   --output-dir ./outputs/sae_checkpoints \
   --device cuda
 ```
@@ -95,33 +91,18 @@ Repeat for `--layer 26`. `--stage1-checkpoint` is optional; omit for random init
 ### Extract test activations (for H1/H3 analysis)
 
 ```bash
-# When2Call MCQ binary subset — action boundary last token (default, H1/H3)
 python -m run.cache_activations extract \
-  --model Qwen/Qwen3.5-4B-Instruct \
+  --model Qwen/Qwen3.5-4B \
   --dataset when2call \
-  --data-path ./data/raw/when2call \
+  --data-path ./data/raw/When2Call/data/test \
   --split test_mcq \
   --layers 24 26 \
   --output-dir ./outputs/activations/when2call_mcq \
   --hook-position last \
   --device cuda
-
-# BFCL generalization
-python -m run.cache_activations extract \
-  --model Qwen/Qwen3.5-4B-Instruct \
-  --dataset bfcl \
-  --data-path ./data/raw/bfcl \
-  --layers 24 26 \
-  --output-dir ./outputs/activations/bfcl_gen \
-  --hook-position last \
-  --device cuda
-
-# Ablation: mean of last 8 tokens
-python -m run.cache_activations extract \
-  ... --hook-position last_t --last-t 8
 ```
 
-### H1: Correlation analysis + Linear probe
+### H1: Feature discovery + Linear probe
 
 ```bash
 python -m analysis.correlation_analysis \
@@ -137,12 +118,6 @@ python -m analysis.linear_probe \
   --layer 24 \
   --output-dir ./outputs/analysis/layer_24/when2call_mcq \
   --device cuda
-```
-
-### H3: Steering experiments
-
-```bash
-bash scripts/run_steering.sh
 ```
 
 ### Full pipeline (Stage 1 → Stage 2 → H1 → H3)
