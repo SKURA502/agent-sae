@@ -8,7 +8,9 @@
 - [x] SAE 两阶段训练搭建完成
 - [ ] controller 未搭建；agent loop 的 sandbox rollout 未搭建
 - [ ] 特征发现、相关性分析、steering/ablation 实验脚本未搭建
+- [ ] main() 函数未搭建，run_pipeline.sh 不完整
 - [ ] 端到端流水线未测试
+- [ ] README.md 缺失
 
 ### 数据
 - [x] When2Call Pref 已确认：3K CALL + 6K NO_CALL（共 9K），用于 Stage 2 训练 + 特征发现
