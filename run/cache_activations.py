@@ -107,7 +107,7 @@ def create_streaming_data_pipeline(
 def cmd_extract(args):
     """Extract：提取激活并保存到磁盘，用于 H1/H3 分析。"""
     from utils import load_samples
-    from tasks.base_adapter import DecisionLabel
+    from .when2call_adapter import DecisionLabel
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}

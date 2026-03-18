@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from controller import AgentLoop, AgentConfig
 from controller.sandbox_tools import NoiseConfig
-from tasks import TaskSample, DecisionLabel
+from .when2call_adapter import TaskSample, DecisionLabel
 from .rollout_logger import RolloutLogger, EpisodeLog, StepLog, create_step_log
 
 

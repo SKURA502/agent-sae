@@ -1,10 +1,4 @@
 #!/bin/bash
-# ================================================================
-# Agent-Tool-Use-MI  完整实验流水线（Stage 1→2→H1→H3）
-# 模型：Qwen3.5-4B-Instruct
-# Hook 层：L24（int(32×3/4)）和 L26（int(32×5/6)）
-# ================================================================
-
 set -e
 
 # ── 配置 ─────────────────────────────────────────────────────────
@@ -21,7 +15,7 @@ BFCL_DIR="$DATA_BASE/bfcl"
 
 STAGE1_TARGET_TOKENS=50000000   # 50M tokens
 STAGE2_TARGET_TOKENS=10000000   # ~10M tokens（When2Call Pref 全量对话文本）
-STAGE2_LR=5e-5
+STAGE2_LR=5e-4
 STAGE2_BATCH=4096
 
 LAYERS="24 26"                  # 两个 hook 层
@@ -33,7 +27,6 @@ echo "  Layers: $LAYERS"
 echo "================================================================"
 
 # ── Step 1：Stage 1 SAE 训练（OpenWebText2，50M tokens）──────────
-echo ""
 echo "▶ Step 1: SAE Stage 1 training (${STAGE1_TARGET_TOKENS} tokens)"
 
 for LAYER in $LAYERS; do
@@ -57,7 +50,6 @@ echo "  Stage 1 checkpoints:"
 find "$OUTPUT_BASE/sae_checkpoints/stage1" -name "*-stage1.pt" 2>/dev/null | sort
 
 # ── Step 2：Stage 2 SAE 训练（When2Call 工具调用对话文本，全 token 流式）──
-echo ""
 echo "▶ Step 2: SAE Stage 2 training (tool-use JSONL, full-text streaming, ${STAGE2_TARGET_TOKENS} tokens)"
 
 for LAYER in $LAYERS; do
@@ -83,7 +75,6 @@ echo "  Stage 2 checkpoints:"
 find "$OUTPUT_BASE/sae_checkpoints/stage2" -name "*-stage2.pt" 2>/dev/null | sort
 
 # ── Step 3：提取测试集激活（H1 主测：When2Call MCQ 二类子集）────
-echo ""
 echo "▶ Step 3: Extract activations — When2Call MCQ (H1 主测)"
 
 python -m run.cache_activations extract \
@@ -98,7 +89,6 @@ python -m run.cache_activations extract \
   --dtype "$DTYPE"
 
 # ── Step 4：提取泛化测试集激活（BFCL Irrelevance + Simple）───────
-echo ""
 echo "▶ Step 4: Extract activations — BFCL generalization (H1 泛化)"
 
 python -m run.cache_activations extract \
@@ -112,7 +102,6 @@ python -m run.cache_activations extract \
   --dtype "$DTYPE"
 
 # ── Step 5：特征发现与线性探针（H1）─────────────────────────────
-echo ""
 echo "▶ Step 5: H1 — Correlation analysis + Linear probe"
 
 for LAYER in $LAYERS; do
@@ -157,7 +146,6 @@ print(matches[0] if matches else '')
 done
 
 # ── Step 6：Steering 实验（H3）───────────────────────────────────
-echo ""
 echo "▶ Step 6: H3 — Steering / Ablation"
 
 for LAYER in $LAYERS; do
@@ -226,7 +214,6 @@ for e in results['experiments']:
 "
 done
 
-echo ""
 echo "================================================================"
 echo "Pipeline complete!  Results: $OUTPUT_BASE"
 echo "================================================================"

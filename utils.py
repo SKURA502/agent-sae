@@ -44,25 +44,30 @@ def add_stage_args(parser: argparse.ArgumentParser):
 
 def add_dataset_args(parser: argparse.ArgumentParser):
     """添加数据集相关 CLI 参数"""
-    parser.add_argument("--dataset", type=str, default="synthetic",
-                        choices=["synthetic", "when2call", "bfcl"])
-    parser.add_argument("--data-path", type=str, default=None, help="Dataset path")
-    parser.add_argument("--num-samples", type=int, default=1000)
+    parser.add_argument("--dataset", type=str, default="when2call",
+                        choices=["when2call"])
+    parser.add_argument("--data-path", type=str, default=None,
+                        help="Dataset path (default: data/raw/When2Call/data/test)")
+    parser.add_argument("--split", type=str, default="test_mcq",
+                        help="Dataset split: train_pref / train_sft / test_mcq")
+    parser.add_argument("--num-samples", type=int, default=-1,
+                        help="Number of samples to load (-1 = all)")
 
 
-def load_samples(dataset: str, data_path: Optional[str], num_samples: int):
-    """按数据集类型加载样本。"""
-    from tasks import SyntheticGenerator, When2CallAdapter, BFCLAdapter
+def load_samples(dataset: str, data_path: Optional[str], num_samples: int,
+                 split: str = "test_mcq"):
+    """加载 When2Call 样本，默认加载 test_mcq 二类子集（排除 UNCERTAIN）。"""
+    from run.when2call_adapter import When2CallAdapter, DecisionLabel
 
-    if dataset == "synthetic":
-        return SyntheticGenerator().generate()[:num_samples]
+    default_path = {
+        "test_mcq": "./data/raw/When2Call/data/test",
+        "train_pref": "./data/raw/When2Call/data/train",
+        "train_sft": "./data/raw/When2Call/data/train",
+    }.get(split, "./data/raw/When2Call/data/test")
 
-    if dataset == "when2call":
-        adapter = When2CallAdapter(data_path or "./data/raw/when2call")
-    elif dataset == "bfcl":
-        adapter = BFCLAdapter(data_path or "./data/raw/bfcl")
-    else:
-        raise ValueError(f"Unsupported dataset: {dataset}")
-
+    adapter = When2CallAdapter(data_path or default_path, split=split)
     adapter.load()
-    return list(adapter)[:num_samples]
+    samples = [s for s in adapter if s.label != DecisionLabel.UNCERTAIN]
+    if num_samples > 0:
+        samples = samples[:num_samples]
+    return samples

@@ -343,7 +343,7 @@ def main():
     s1 = sub.add_parser("stage1", help="Stage 1: pretrain corpus")
     add_stage_args(s1)
 
-    s2 = sub.add_parser("stage2", help="Stage 2: tool-use data (full-text streaming)")
+    s2 = sub.add_parser("stage2", help="Stage 2: When2Call pref+sft action-boundary activations")
     add_stage_args(s2)
     s2.add_argument("--stage1-checkpoint", type=str, default=None,
                     help="Stage 1 .pt checkpoint path (optional; random init if omitted)")
@@ -395,21 +395,35 @@ def main():
             print(f"Warning: Stage 1 checkpoint not found at {s1_ckpt}, "
                   "training from scratch")
 
-    pt_cfg = PretrainConfig(
-        data_dir=args.data_dir,
-        target_tokens=args.target_tokens,
-        seq_length=args.seq_length,
-        sample_position="all",
-        positions_per_seq=args.seq_length,
-    )
     buffer_size = args.buffer_size if args.buffer_size is not None else args.batch_size
     total_steps = max(args.target_tokens // args.batch_size, 1)
 
-    gen = create_pretrain_data_iterator(
-        model=model, tokenizer=tokenizer, config=pt_cfg,
-        layers=[layer], batch_size=args.inference_batch_size,
-        buffer_size=buffer_size, device=args.device,
-    )
+    if stage == "stage2":
+        from run.when2call_adapter import create_stage2_data_iterator
+        gen = create_stage2_data_iterator(
+            model=model, tokenizer=tokenizer,
+            data_dir=args.data_dir,
+            layers=[layer],
+            target_tokens=args.target_tokens,
+            max_length=args.seq_length,
+            inference_batch_size=args.inference_batch_size,
+            buffer_size=buffer_size,
+            device=args.device,
+        )
+    else:
+        pt_cfg = PretrainConfig(
+            data_dir=args.data_dir,
+            target_tokens=args.target_tokens,
+            seq_length=args.seq_length,
+            sample_position="all",
+            positions_per_seq=args.seq_length,
+        )
+        gen = create_pretrain_data_iterator(
+            model=model, tokenizer=tokenizer, config=pt_cfg,
+            layers=[layer], batch_size=args.inference_batch_size,
+            buffer_size=buffer_size, device=args.device,
+        )
+
     trainer.train_streaming(gen, layer, total_steps)
     trainer.model._normalize_decoder()
     trainer.save_checkpoint(ckpt_name)

@@ -10,8 +10,7 @@ import sys
 import yaml
 from pathlib import Path
 
-from tasks import When2CallAdapter, BFCLAdapter, SyntheticGenerator
-from run import RolloutGenerator
+from run import RolloutGenerator, When2CallAdapter
 from analysis import CorrelationAnalyzer, LinearProbe, Visualizer
 
 
@@ -55,21 +54,12 @@ def cmd_generate_rollouts(args):
     )
     
     # 加载数据集
-    if args.dataset == "when2call":
-        adapter = When2CallAdapter(args.data_path or "./data/raw/when2call", split=args.split)
-        adapter.load()
-        samples = list(adapter)[:args.num_samples]
-    elif args.dataset == "bfcl":
-        adapter = BFCLAdapter(args.data_path or "./data/raw/bfcl", split=args.split)
-        adapter.load()
-        samples = list(adapter)[:args.num_samples]
-    else:
-        generator_config = None
-        if args.seed is not None:
-            from tasks.synthetic_generator import GeneratorConfig
-            generator_config = GeneratorConfig(num_samples=args.num_samples, seed=args.seed)
-        adapter = SyntheticGenerator(config=generator_config)
-        samples = adapter.generate()[:args.num_samples]
+    adapter = When2CallAdapter(
+        args.data_path or "./data/raw/When2Call/data/test",
+        split=args.split or "test_mcq",
+    )
+    adapter.load()
+    samples = list(adapter)[:args.num_samples]
     
     generator.run(samples, experiment_name=args.experiment_name)
 
@@ -134,8 +124,8 @@ def main():
     p_rollout.add_argument("--model-config", type=str,
                           default=str(Path(__file__).parent / "configs" / "model_config.yaml"),
                           help="Path to model_config.yaml")
-    p_rollout.add_argument("--dataset", type=str, default="synthetic",
-                          choices=["when2call", "bfcl", "synthetic"])
+    p_rollout.add_argument("--dataset", type=str, default="when2call",
+                          choices=["when2call"])
     p_rollout.add_argument("--data-path", type=str, default=None,
                           help="Dataset root path for when2call/bfcl")
     p_rollout.add_argument("--split", type=str, default="test",
