@@ -122,11 +122,41 @@ def _load_llm(model_name: str, device: str, dtype: str):
     }
     print(f"Loading LLM: {model_name}")
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
+
+    # 若模型配置含 FP8 量化，设置 dequantize=True，让 transformers 加载时把
+    # FP8 权重反量化为 bfloat16，避免需要 Triton FP8 kernel
+    from transformers import AutoConfig
+    model_config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+
+    def _disable_fp8(cfg):
+        qc = getattr(cfg, "quantization_config", None)
+        if qc is None:
+            return
+        if isinstance(qc, dict):
+            if qc.get("quant_method") == "fp8":
+                print("  Setting dequantize=True on FP8 quantization config (Triton FP8 unavailable)")
+                qc["dequantize"] = True
+        else:
+            if getattr(qc, "quant_method", None) == "fp8":
+                print("  Setting dequantize=True on FP8 quantization config (Triton FP8 unavailable)")
+                qc.dequantize = True
+
+    _disable_fp8(model_config)
+    text_cfg = getattr(model_config, "text_config", None)
+    if text_cfg is not None:
+        _disable_fp8(text_cfg)
+
+    load_kwargs = dict(
+        config=model_config,
         torch_dtype=dtype_map.get(dtype, torch.bfloat16),
         device_map=device, trust_remote_code=True,
     )
+    try:
+        model = AutoModelForCausalLM.from_pretrained(model_name, **load_kwargs)
+    except ValueError:
+        from transformers import AutoModelForImageTextToText
+        print("  AutoModelForCausalLM failed, retrying with AutoModelForImageTextToText ...")
+        model = AutoModelForImageTextToText.from_pretrained(model_name, **load_kwargs)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -330,7 +360,10 @@ class SAETrainer:
 
     def _finish_swanlab(self):
         if self._swanlab_active and SWANLAB_AVAILABLE:
-            swanlab.finish()
+            try:
+                swanlab.finish()
+            except Exception as e:
+                print(f"  Warning: swanlab.finish() failed (ignored): {e}")
             self._swanlab_active = False
 
 
@@ -399,7 +432,7 @@ def main():
     total_steps = max(args.target_tokens // args.batch_size, 1)
 
     if stage == "stage2":
-        from run.when2call_adapter import create_stage2_data_iterator
+        from utils.when2call_adapter import create_stage2_data_iterator
         gen = create_stage2_data_iterator(
             model=model, tokenizer=tokenizer,
             data_dir=args.data_dir,
@@ -409,6 +442,7 @@ def main():
             inference_batch_size=args.inference_batch_size,
             buffer_size=buffer_size,
             device=args.device,
+            log_dir=stage_output_dir,
         )
     else:
         pt_cfg = PretrainConfig(

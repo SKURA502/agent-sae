@@ -16,7 +16,7 @@ Stage 2 SAE 训练：pref + sft 全量，对每条样本 apply_chat_template 构
 
 特征发现：仅 pref（9K），调用方分类别取 E[f|CALL] − E[f|NO_CALL]。
 
-评测（H1/H3）：加载 mcq，过滤 UNCERTAIN 得 2,590 条二类子集。
+评测（H1/H3）：加载 mcq，过滤 UNCERTAIN 得全部四类子集（direct/tool_call/request_for_info/cannot_answer）。
 """
 
 import json
@@ -35,6 +35,7 @@ from tqdm import tqdm
 class DecisionLabel(str, Enum):
     CALL = "call"
     NO_CALL = "no_call"
+    REQUEST_FOR_INFO = "request_for_info"
     UNCERTAIN = "uncertain"
 
 
@@ -157,9 +158,10 @@ class When2CallAdapter:
 
         call_n = sum(1 for s in self._samples if s.label == DecisionLabel.CALL)
         no_call_n = sum(1 for s in self._samples if s.label == DecisionLabel.NO_CALL)
+        rfi_n = sum(1 for s in self._samples if s.label == DecisionLabel.REQUEST_FOR_INFO)
         unc_n = sum(1 for s in self._samples if s.label == DecisionLabel.UNCERTAIN)
         print(f"Loaded {len(self._samples)} samples [{data_file.name}] "
-              f"CALL={call_n} NO_CALL={no_call_n} UNCERTAIN={unc_n}")
+              f"CALL={call_n} NO_CALL={no_call_n} REQUEST_FOR_INFO={rfi_n} UNCERTAIN={unc_n}")
         return self
 
     def _find_file(self) -> Path:
@@ -211,7 +213,7 @@ class When2CallAdapter:
             if val in ("cannot_answer", "no_call", "no", "0", "false", "direct"):
                 return DecisionLabel.NO_CALL
             if val == "request_for_info":
-                return DecisionLabel.UNCERTAIN
+                return DecisionLabel.REQUEST_FOR_INFO
 
         # SFT 格式兜底（无 chosen_response / answer 字段，全为 NO_CALL）
         if "sft" in self.split.lower():
@@ -220,8 +222,12 @@ class When2CallAdapter:
         return DecisionLabel.UNCERTAIN
 
     def _convert(self, raw: Dict[str, Any], idx: int) -> TaskSample:
-        # ── tools（pref/sft 用 "tools"；mcq 用 "orig_tools"）──────────────
-        tools_raw = raw.get("tools") or raw.get("orig_tools") or []
+        # ── tools（pref/sft 用 "tools"；mcq 优先 "orig_tools" 再 "tools"）──
+        is_mcq = "mcq" in self.split.lower()
+        if is_mcq:
+            tools_raw = raw.get("tools") or []
+        else:
+            tools_raw = raw.get("tools") or raw.get("orig_tools") or []
         if not isinstance(tools_raw, list):
             tools_raw = [tools_raw] if tools_raw else []
         tool_schemas = _parse_tools(tools_raw)
@@ -264,6 +270,9 @@ class When2CallAdapter:
                 # action boundary prompt 构建用
                 "boundary_messages": boundary_messages,
                 "original_tools_raw": tools_raw,
+                # MCQ 格式专属：四个选项的具体文本及正确答案
+                "mcq_answers": raw.get("answers"),          # dict or None
+                "correct_answer": raw.get("correct_answer"), # str or None
             },
         )
 
@@ -304,6 +313,8 @@ def create_stage2_data_iterator(
     inference_batch_size: int = 16,
     buffer_size: int = 8192,
     device: str = "cuda",
+    log_dir: Optional[Union[str, Path]] = None,
+    log_n: int = 5,
 ) -> Generator[Dict[int, torch.Tensor], None, None]:
     """
     Stage 2 SAE 训练数据迭代器。
@@ -333,11 +344,43 @@ def create_stage2_data_iterator(
           f"(pref={len(pref)}, sft={len(sft)})")
 
     # ── build text prompts using tokenizer ───────────────────────────────
+    def _normalize_tools_for_template(tools: List[Dict]) -> List[Dict]:
+        """将扁平格式 {name, description, parameters} 统一转为 OpenAI 格式
+        {type: function, function: {...}}，兼容 Gemma-4 等模型的 chat template。"""
+        normalized = []
+        for t in tools:
+            if isinstance(t, dict) and t.get("type") == "function" and "function" in t:
+                normalized.append(t)  # 已是 OpenAI 格式
+            elif isinstance(t, dict) and "name" in t:
+                normalized.append({"type": "function", "function": t})
+        return normalized
+
+    # 检测 tokenizer chat template 是否原生支持 tools 参数
+    _tmpl_src = getattr(tokenizer, "chat_template", "") or ""
+    _template_has_tools = "tools" in str(_tmpl_src)
+
     def _sample_to_text(sample: TaskSample) -> Optional[str]:
+        from utils.templates import DEFAULT_SYSTEM_PROMPT, TOOL_USE_INSTRUCTIONS
         msgs = sample.metadata.get("boundary_messages") or []
-        tools = sample.tool_schemas or []
+        tools = _normalize_tools_for_template(sample.tool_schemas or [])
         if not msgs:
             msgs = [{"role": "user", "content": sample.instruction}]
+
+        if tools and not _template_has_tools:
+            # chat template 不支持 tools（如 Gemma-3）：手动注入为 system message
+            tools_xml = "\n".join(
+                "<tool>\n" + json.dumps(t.get("function", t), ensure_ascii=False, indent=2) + "\n</tool>"
+                for t in tools
+            )
+            sys_content = DEFAULT_SYSTEM_PROMPT + tools_xml + "\n" + TOOL_USE_INSTRUCTIONS
+            msgs_with_sys = [{"role": "system", "content": sys_content}] + msgs
+            try:
+                return tokenizer.apply_chat_template(
+                    msgs_with_sys, tokenize=False, add_generation_prompt=True,
+                )
+            except Exception:
+                pass  # fall through to generic fallbacks below
+
         try:
             return tokenizer.apply_chat_template(
                 msgs, tokenize=False, add_generation_prompt=True,
@@ -352,6 +395,26 @@ def create_stage2_data_iterator(
                 return "\n".join(
                     f"{m.get('role', 'user')}: {m.get('content', '')}" for m in msgs
                 )
+
+    # ── log first N samples ──────────────────────────────────────────
+    if log_dir is not None:
+        log_path = Path(log_dir) / "stage2_data_preview.txt"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "w", encoding="utf-8") as f:
+            count = 0
+            for s in all_samples:
+                if count >= log_n:
+                    break
+                text = _sample_to_text(s)
+                if not text:
+                    continue
+                f.write(f"{'='*60}\n")
+                f.write(f"[{count}] sample_id={s.sample_id}  label={s.label.value}\n")
+                f.write(f"{'='*60}\n")
+                f.write(text)
+                f.write("\n\n")
+                count += 1
+        print(f"Stage 2 data preview ({count} samples) → {log_path}")
 
     def text_iter() -> Iterator[str]:
         for s in all_samples:

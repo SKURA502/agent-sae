@@ -1,135 +1,263 @@
-# Agent-Tool-Use-MI
+# To Call or Not to Call: Diagnosing Intrinsic Over-Calling Bias in LLM Agents
 
-Mechanistic interpretability study of tool-call decisions in LLMs via Sparse Autoencoders (SAE).
+Official implementation of the paper **"To Call or Not to Call: Diagnosing Intrinsic Over-Calling Bias in LLM Agents"**.
 
-## Research Question
+This repository provides a mechanistic interpretability framework for understanding and correcting tool-calling decision bias in LLM agents, using Sparse Autoencoders (SAE) to identify and steer the internal representations that drive over-calling behavior.
 
-> Which internal representations in an LLM determine whether to invoke a tool?
+---
 
-## Hypotheses
+## Overview
 
-| | Hypothesis | Evidence |
-|---|---|---|
-| **H1** | A sparse set of latent features in the residual stream acts as a gating signal for tool-call decisions at action boundaries | Feature discovery (mean diff + AUROC) + linear probe → Fig 1 |
-| **H2** | The gate accumulates continuously as the model perceives a growing information gap, rather than firing at a single point | Per-step feature intensity trajectories across multi-turn episodes → Fig 3 |
-| **H3** | Targeted activation steering of gate features reliably flips tool-call behavior without significantly degrading language quality | Steering / ablation flip rate + Δperplexity → Fig 2 |
+LLM agents frequently exhibit an *intrinsic over-calling bias* — they invoke tools even when a direct answer or a request for clarification would be more appropriate. This project:
 
-## Method Overview
+1. **(H1) Feature discovery**: discovers SAE features that encode the "tool-call" concept at the action boundary and verifies they form a linearly separable subspace.
+2. **(H2) Bias quantification**: fits a logistic regression on TC vs. RFI feature activations to measure the intrinsic TC bias `β₀` and its decision-boundary shift `δ = -β₀/β`.
+3. **(H3) Causal steering**: demonstrates that suppressing tool-call features or promoting request-for-info features causally shifts model decisions.
+4. **Correction**: applies **AMCS** (Adaptive Margin-Calibrated Steering) at inference time to neutralize the bias using `δ` as the sole data-driven parameter.
 
-- **Model**: Qwen3.5-4B (primary), Qwen3.5-9B (scale comparison)
-- **Representation**: TopK SAE on residual stream at ~3/4 and ~5/6 model depth (layers 24 & 26)
-- **SAE training**: Two-stage — Stage 1 on OpenWebText2 (~50M tokens), Stage 2 fine-tuned on When2Call (~25K samples)
-- **Feature discovery**: `E[f|CALL] − E[f|NO_CALL]` + per-feature AUROC, top-K gate features selected
-- **Causal evidence**: Activation steering / ablation on top gate features, measuring decision flip rate
+---
 
 ## Repository Structure
 
 ```
 Agent-Tool-Use-MI/
-├── sae/                     # SAE model + two-stage training
-│   ├── sae_model.py         # TopK SAE implementation
-│   ├── train_sae.py         # Stage 1 (OpenWebText2) + Stage 2 (When2Call)
-│   ├── pretrain_data.py     # OpenWebText2 streaming loader
-│   ├── interp_sae.py        # Activation maximisation / interpretability utils
-│   └── calc_cos_sim.py      # Feature cosine similarity
+├── sae/                        # SAE architecture and training
+│   ├── sae_model.py            # TopK SAE (encoder + decoder)
+│   ├── train_sae.py            # Two-stage SAE training pipeline
+│   ├── pretrain_data.py        # Streaming activation extractor
+│   └── interp_sae.py           # Feature interpretation utilities
 │
-├── run/                     # Data loading + activation extraction + rollout generation
-│   ├── when2call_adapter.py # Parses When2Call pref/sft/mcq splits → (text, label)
-│   ├── cache_activations.py # Extracts & caches residual-stream activations
-│   ├── generate_rollouts.py # H2: multi-step sandbox episodes (tau2-bench seeds)
-│   └── rollout_logger.py    # Serialises per-step activations to disk
+├── run/                        # Data preparation and evaluation runners
+│   ├── cache_activations.py    # Extract and label activations from the test set
+│   ├── eval_amcs_accuracy.py   # AMCS bias correction evaluation
+│   ├── eval_suppress_accuracy.py  # Steering (suppress / promote) evaluation
+│   ├── eval_baseline_rfi.py    # RFI baseline evaluation
+│   └── sweep_amcs_topn.py      # AMCS hyper-parameter sweep
 │
-├── controller/              # H2 sandbox agent loop
-│   ├── sandbox_tools.py     # search / calculator / lookup with noise injection
-│   └── agent_loop.py        # Minimal agent loop; collects per-step activations
+├── analysis/                   # Analysis and visualization scripts
+│   ├── feature_discovery.py    # H1: compute mean_diff and AUROC per SAE feature
+│   ├── linear_probe.py         # H1: linear separability verification
+│   ├── steering.py             # H3: causal steering experiments
+│   ├── case_study_visualize.py # Per-sample case study visualizations
+│   └── plot_linear_probe_combined.py
 │
-├── analysis/                # Hypothesis-testing scripts
-│   ├── feature_discovery.py # H1: mean_diff + AUROC → top-K features (Fig 1a)
-│   ├── linear_probe.py      # H1: logistic regression 5-fold CV (Fig 1b)
-│   ├── steering.py          # H3: SteeringHook, flip rate + Δperplexity (Fig 2)
-│   └── trajectory_analysis.py # H2: feature intensity vs step (Fig 3)
+├── utils_validation/           # Validation and plotting utilities
+│   ├── bias/
+│   │   ├── tc_bias_logistic.py          # H2: logistic regression to quantify TC bias β₀
+│   │   ├── plot_pred_tc_combined.py     # H2: predicted-TC scatter plots (multi-model)
+│   │   └── plot_pred_tc_nc_combined.py  # H2: TC vs. RFI margin scatter plots
+│   └── feature_discovery/
+│       ├── plot_combined_bar.py         # H1: combined feature bar chart
+│       ├── plot_multi_model_bar.py      # H1: multi-model feature bar chart
+│       └── plot_umap_tc_nc_combined.py  # H1: UMAP visualization across models
 │
-├── scripts/
-│   ├── run_pipeline.sh      # End-to-end pipeline (Steps 1–7)
-│   └── swanlab_sync.py      # SwanLab experiment sync
+├── utils/
+│   ├── templates.py            # Chat templates for Qwen / Gemma / Ministral
+│   ├── when2call_adapter.py    # When2Call dataset loader
+│   └── __init__.py             # Shared CLI argument helpers
 │
-├── data/
-│   └── raw/
-│       ├── When2Call/       # When2Call dataset (train/test splits)
-│       └── tau2-bench-main/ # tau2-bench source (H2 prompt seeds)
+├── scripts/                    # End-to-end shell scripts
+│   ├── train_sae.sh
+│   ├── cache_activations.sh
+│   ├── feature_discovery_when2call.sh
+│   ├── linear_probe_combined.sh
+│   ├── eval_suppress_accuracy.sh
+│   ├── eval_amcs.sh
+│   ├── eval_baseline_rfi.sh
+│   └── sweep_amcs_topn.sh
 │
-├── outputs/                 # Generated outputs (gitignored)
-│   ├── sae_checkpoints/     # Stage 1 + Stage 2 SAE .pt files
-│   ├── activations/         # Cached residual-stream activations
-│   ├── rollouts/            # H2 episode trajectories + per-step activations
-│   └── analysis/            # Feature scores JSON + figures
+├── checkpoint/                 # Pre-trained SAE checkpoints (per model)
+│   └── {MODEL_NAME}/
+│       ├── stage1/             # General-corpus SAE
+│       └── stage2/             # Tool-call-task SAE
 │
-├── utils.py                 # Shared utilities (hook helpers, dtype coercion, …)
-└── requirements.txt
+└── outputs/                    # Experiment outputs (auto-created)
+    └── {MODEL_NAME}/
+        ├── activations/
+        ├── analysis/
+        ├── amcs/
+        └── steer_accuracy/
 ```
 
-## Data
+---
 
-| Split | Size | Label | Use |
-|---|---|---|---|
-| When2Call Pref | 9K | CALL (3K) / NO_CALL (6K) | Stage 2 training + H1 feature discovery |
-| When2Call SFT | 15K | NO_CALL | Stage 2 training |
-| When2Call MCQ | 2,590 | tool_call / cannot_answer | H1 linear probe + H3 steering (request_for_info filtered out) |
-| tau2-bench | — | — | H2: `reason_for_call` field as multi-turn prompt seeds |
+## Supported Models
 
-## Setup
+Pre-trained SAE checkpoints are provided for all eight models:
+
+| Model | SAE Layer | Dict Size |
+|---|---|---|
+| `gemma-3-1b-it` | 17 | 9216 |
+| `gemma-3-4b-it` | 29 | 20480 |
+| `gemma-4-E2B-it` | 30 | 12288 |
+| `gemma-4-E4B-it` | 30 | 20480 |
+| `Ministral-3-3B-Instruct-2512` | 21 | 24576 |
+| `Ministral-3-8B-Instruct-2512` | 31 | 32768 |
+| `Qwen3.5-4B` | 25 | 20480 |
+| `Qwen3.5-9B` | 25 | 32768 |
+
+---
+
+## Installation
 
 ```bash
+git clone https://github.com/YOUR_ORG/Agent-Tool-Use-MI.git
+cd Agent-Tool-Use-MI
 pip install -r requirements.txt
 ```
 
-Optionally set environment variables before running the pipeline:
+**Key dependencies:**
 
-```bash
-export MODEL_PATH="Qwen/Qwen3.5-4B"   # default
-export DATA_BASE="./data/raw"                    # default
-export OUTPUT_BASE="./outputs"                   # default
-export DEVICE="cuda"
-export DTYPE="bfloat16"
+```
+torch>=2.1.0
+transformers>=4.40.0
+accelerate>=0.27.0
+datasets>=2.18.0
+einops>=0.7.0
+scikit-learn>=1.4.0
+matplotlib>=3.8.0
 ```
 
-## Running the Pipeline
+---
 
-```bash
-# Full pipeline (H1 + H3; H2 skipped by default)
-bash scripts/run_pipeline.sh
+## Dataset
 
-# Include H2 rollout generation
-RUN_H2=1 bash scripts/run_pipeline.sh
+This project uses the **When2Call** benchmark. Place the data under `data/raw/When2Call/data/` with the following structure:
 
-# Tune rollout parameters
-RUN_H2=1 H2_DOMAIN=retail H2_N_EPISODES=200 bash scripts/run_pipeline.sh
+```
+data/raw/When2Call/data/
+├── train/
+│   ├── when2call_train_pref.jsonl   # 9K samples (3K CALL + 6K NO_CALL)
+│   └── when2call_train_sft.jsonl    # 15K NO_CALL samples
+└── test/
+    └── when2call_test_mcq.jsonl     # 3652 MCQ samples (evaluation only)
 ```
 
-### Step-by-step
+Each test sample has four possible labels: `direct_answer`, `tool_call`, `request_for_info`, `cannot_answer`.
 
-| Step | Script | Description |
-|---|---|---|
-| 1 | `sae.train_sae stage1` | SAE pretraining on OpenWebText2 (50M tokens) |
-| 2 | `sae.train_sae stage2` | SAE fine-tuning on When2Call pref+sft |
-| 3 | `run.cache_activations` | Extract activations — When2Call MCQ (H1/H3) |
-| 3b | `run.cache_activations` | Extract activations — When2Call Pref (feature discovery) |
-| 4 | `analysis.feature_discovery` | H1: top-K gate features per layer |
-| 5 | `analysis.linear_probe` | H1: logistic regression probe, AUC vs K |
-| 6 | `analysis.steering` | H3: steering flip rate + Δperplexity |
-| 7 | `run.generate_rollouts` + `analysis.trajectory_analysis` | H2: episode rollout + trajectory plot (opt-in) |
+---
 
-## Experiment Priority
+## Usage
 
-**H1 → H3 → H2**
+### Step 1 — Train SAE (two-stage)
 
-H1 and H3 only depend on static labelled data (When2Call). H2 requires the full agent loop to be validated before generating sandbox rollouts.
+```bash
+export MODEL_PATH=/path/to/Qwen3.5-4B
+export PRETRAIN_DIR=/path/to/openwebtext2
+export WHEN2CALL_TRAIN=/path/to/when2call/train
+bash scripts/train_sae.sh
+```
 
-## Status
+- **Stage 1**: trains on 50M tokens of general corpus (e.g., OpenWebText2).
+- **Stage 2**: fine-tunes on ~5M tokens of When2Call (`pref` + `sft` splits).
 
-- [x] SAE two-stage training
-- [x] H1 feature discovery + linear probe scripts
-- [x] H3 steering / ablation scripts
-- [x] H2 agent loop + rollout infrastructure
-- [ ] End-to-end pipeline tested (pending SAE training run)
-- [ ] README complete ← you are here
+Checkpoints are saved to `checkpoint/{MODEL_NAME}/stage{1,2}/`.
+
+### Step 2 — Extract activations
+
+```bash
+export MODEL_PATH=/path/to/Qwen3.5-4B
+bash scripts/cache_activations.sh
+```
+
+Extracts hidden-state activations at the action boundary for all MCQ test samples. Output: `outputs/{MODEL_NAME}/activations/when2call_mcq/layer_{L}_activations.pt`.
+
+### Step 3 — Feature discovery (H1)
+
+```bash
+# Discover tool-call features
+CONCEPT=tool_call bash scripts/feature_discovery_when2call.sh
+
+# Discover request-for-info features
+CONCEPT=request_for_info bash scripts/feature_discovery_when2call.sh
+```
+
+Computes `mean_diff` and AUROC per SAE feature. Outputs top-K feature lists and visualizations (AUROC distribution, mean-diff bar charts, UMAP) to `outputs/{MODEL_NAME}/analysis/feature_discovery/{concept}/`.
+
+### Step 4 — Linear separability (H1)
+
+```bash
+bash scripts/linear_probe_combined.sh
+```
+
+Trains logistic regression probes on top-K features and reports cross-validated AUC. Output: `outputs/{MODEL_NAME}/analysis/linear_probe/`.
+
+### Step 5 — Bias quantification (H2)
+
+```bash
+python -m utils_validation.bias.tc_bias_logistic \
+  --layer 25 \
+  --sae-path checkpoint/Qwen3.5-4B/stage2/Qwen3.5-4B-L25-d20480-5M-stage2.pt \
+  --activations-dir outputs/Qwen3.5-4B/activations/when2call_mcq \
+  --feature-discovery-dir outputs/Qwen3.5-4B/analysis/feature_discovery \
+  --output-dir outputs/Qwen3.5-4B/analysis/rfi_confusion
+```
+
+Fits a logistic regression `P(pred=TC) = sigmoid(β · margin + β₀)` where `margin = tc_act − rfi_act` is the difference in TC vs. RFI feature activations. The intercept `β₀ > 0` quantifies the intrinsic TC bias, and `δ = -β₀/β` is the decision-boundary shift used later by AMCS. Also produces scatter visualizations showing the predicted-TC rate as a function of feature activation margin. Output: `outputs/{MODEL_NAME}/analysis/rfi_confusion/`.
+
+### Step 6 — Causal steering (H3)
+
+```bash
+# suppress tool-call features only
+bash scripts/eval_suppress_accuracy.sh Qwen3.5-4B suppress_tc cuda:0
+
+# promote request-for-info features only
+bash scripts/eval_suppress_accuracy.sh Qwen3.5-4B promote_rfi cuda:0
+
+# both simultaneously
+bash scripts/eval_suppress_accuracy.sh Qwen3.5-4B both cuda:0
+```
+
+Applies activation steering at inference time and measures accuracy on the MCQ test set. Output: `outputs/{MODEL_NAME}/steer_accuracy/`.
+
+### Step 7 — AMCS bias correction
+
+```bash
+bash scripts/sweep_amcs_topn.sh
+```
+
+Runs Adaptive Margin-Calibrated Steering (AMCS), which uses a single data-driven parameter `δ = -β₀/β` to construct a fixed steering vector that neutralizes the intrinsic TC bias. No validation-set search is required.
+
+---
+
+## Key Concepts
+
+### Action Boundary
+
+The hidden state extracted at the position where the model has consumed the full context (system prompt + tools + user message) and is about to produce the first assistant token. This is the point at which tool-call vs. no-call decisions are encoded.
+
+### Two-Stage SAE Training
+
+| Stage | Corpus | Tokens | Purpose |
+|---|---|---|---|
+| Stage 1 | OpenWebText2 | 50M | Learn general language features |
+| Stage 2 | When2Call (pref + sft) | ~5M | Specialize for tool-call decision features |
+
+### Intrinsic TC Bias (H2)
+
+To quantify the model's built-in preference for tool calls, a logistic regression is fitted on samples where the ground truth is either `tool_call` or `request_for_info`:
+
+```
+P(pred=TC) = sigmoid(β · margin + β₀)
+margin = tc_act − rfi_act
+```
+
+`tc_act` and `rfi_act` are the summed top-N SAE feature activations for the TC and RFI concepts respectively. The intercept `β₀ > 0` indicates that even when both concepts are equally activated, the model still prefers to call a tool. The decision-boundary shift `δ = -β₀/β` measures how much the RFI signal must exceed the TC signal before the model switches away from tool-calling.
+
+`δ` is the sole data-driven parameter fed into AMCS.
+
+### AMCS (Adaptive Margin-Calibrated Steering)
+
+A closed-form, inference-time bias correction method. The steering vector is:
+
+```
+v = Σ wᵢ · n · α · δ · dᵢ
+```
+
+where `δ` is derived from the dataset-measured intrinsic bias `β₀`, `α` allocates budget between TC-suppression and RFI-promotion, and `dᵢ` are the top-N SAE decoder directions. No per-sample gating or semantic hyperparameter tuning is needed.
+
+---
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.

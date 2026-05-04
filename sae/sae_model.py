@@ -139,19 +139,56 @@ class TopKSAE(nn.Module):
         feature_idx: int,
         strength: float,
     ) -> torch.Tensor:
-        """在 latent 空间对目标特征进行 steering（缩放）
+        """在原始 activation 上直接加减 decoder 方向来 steer 指定特征。
+
+        h_new = h + (strength - 1) * z_i * d_i
+
+        其中 z_i 是 feature_idx 的 TopK 编码激活值，d_i 是其 decoder 列向量。
+        不走完整 encode→decode，避免 TopK 重建误差污染其他特征。
+        strength=1.0 时变化量为 0（真正的 baseline）。
+
         Args:
             x: [batch, input_dim] 输入激活
             feature_idx: 要 steering 的特征索引
-            strength: 目标特征缩放系数（1.0 不变，>1 增强，0 抑制）
+            strength: 目标特征缩放系数（1.0 不变，>1 增强，<1 抑制，0 完全消除）
         Returns:
-            steered_x: [batch, input_dim] 在 latent 调整后重建得到的激活
+            steered_x: [batch, input_dim] 调整后的激活
         """
         with torch.no_grad():
-            latents = self.encode(x)
-            latents[:, feature_idx] = latents[:, feature_idx] * strength
-            steered_x = self.decode(latents)
-        return steered_x
+            latents = self.encode(x)                         # [batch, dict_size]
+            z_i = latents[:, feature_idx]                   # [batch]
+            d_i = self.decoder.weight[:, feature_idx]       # [input_dim]
+            delta = (strength - 1) * z_i.unsqueeze(-1) * d_i.unsqueeze(0)
+            return x + delta
+
+    def steer_multi(
+        self,
+        x: torch.Tensor,
+        feature_indices: list,
+        strengths: list,
+    ) -> torch.Tensor:
+        """在原始 activation 上直接加减 decoder 方向来同时 steer 多个特征。
+
+        h_new = h + sum_i (strength_i - 1) * z_i * d_i
+
+        不走完整 encode→decode，避免 TopK 重建误差污染其他特征。
+        strength=1.0 时对应特征的变化量为 0（真正的 baseline）。
+
+        Args:
+            x: [batch, input_dim] 输入激活
+            feature_indices: 要 steering 的特征索引列表
+            strengths: 对应的缩放系数列表
+        Returns:
+            steered_x: [batch, input_dim] 调整后的激活
+        """
+        with torch.no_grad():
+            latents = self.encode(x)                         # [batch, dict_size]
+            delta = torch.zeros_like(x)
+            for feat_idx, strength in zip(feature_indices, strengths):
+                z_i = latents[:, feat_idx]                  # [batch]
+                d_i = self.decoder.weight[:, feat_idx]      # [input_dim]
+                delta += (strength - 1) * z_i.unsqueeze(-1) * d_i.unsqueeze(0)
+            return x + delta
     
     def save(self, path: str):
         """保存模型"""
