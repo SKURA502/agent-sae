@@ -1,0 +1,50 @@
+============================================================
+[0] sample_id=w2c_train_pref_000000  label=call
+============================================================
+<bos><|turn>system
+<|tool>declaration:get_ico_calendar{description:<|"|>Fetches the ICO (Initial Coin Offering) calendar based on the given parameters.<|"|>,parameters:{properties:{category:{description:<|"|>Comma-separated list of categories to filter the ICOs. For example: "_ico_cat_gaming,_ico_cat_ecomm,_ico_cat_finance,_ico_cat_healthcare".<|"|>,type:<|"|>STR, OPTIONAL<|"|>},lang_id:{description:<|"|>Language ID for the response. Default is 1.<|"|>,type:<|"|>INT, OPTIONAL<|"|>},sort:{description:<|"|>The sorting criterion. Options are 'related_days', 'name', 'funds_raised', or 'completed'. Default is 'related_days'.<|"|>,type:<|"|>STR, OPTIONAL<|"|>},tabname:{description:<|"|>The status of the ICOs to retrieve. Options are 'upcoming', 'completed', or 'ongoing'. Default is 'ongoing'.<|"|>,type:<|"|>STR, OPTIONAL<|"|>},time_utc_offset:{description:<|"|>UTC offset in seconds. For instance, UTC+8 is represented as 8 * 60 * 60 = 28800.<|"|>,type:<|"|>INT, OPTIONAL<|"|>}},type:<|"|>DICT<|"|>}}<tool|><turn|>
+<|turn>user
+Show me completed ICOs in the e-commerce and finance sectors, sorted by funds raised, with a UTC offset of 8 hours.<turn|>
+<|turn>model
+
+
+============================================================
+[1] sample_id=w2c_train_pref_000001  label=no_call
+============================================================
+<bos><|turn>system
+<|tool>declaration:monthly_mortgage_payment{description:<|"|>Calculates the monthly mortgage payment based on the loan amount, annual interest rate, and loan term.<|"|>,parameters:{properties:{annual_interest_rate:{description:<|"|>The annual interest rate as a decimal (e.g., 0.05 for 5%).<|"|>,type:<|"|>FLOAT<|"|>},loan_amount:{description:<|"|>The total amount of the loan.<|"|>,type:<|"|>FLOAT<|"|>},loan_term_years:{description:<|"|>The loan term in years.<|"|>,type:<|"|>INT<|"|>}},type:<|"|>DICT<|"|>}}<tool|><|tool>declaration:cosine_similarity{description:<|"|>Calculates the cosine similarity between two vectors.<|"|>,parameters:{properties:{vector_a:{description:<|"|>The first vector.<|"|>,type:<|"|>LIST[FLOAT]<|"|>},vector_b:{description:<|"|>The second vector.<|"|>,type:<|"|>LIST[FLOAT]<|"|>}},type:<|"|>DICT<|"|>}}<tool|><turn|>
+<|turn>user
+Find the 99% confidence interval for a sample with a standard deviation of 3, mean of 12, and size of 40.<turn|>
+<|turn>model
+
+
+============================================================
+[2] sample_id=w2c_train_pref_000002  label=call
+============================================================
+<bos><|turn>system
+<|tool>declaration:rgb_to_cmyk{description:<|"|>Converts an RGB color code to a CMYK color code using an external API.<|"|>,parameters:{properties:{b:{description:<|"|>The blue component of the RGB color code (0-255).<|"|>,type:<|"|>INT<|"|>},g:{description:<|"|>The green component of the RGB color code (0-255).<|"|>,type:<|"|>INT<|"|>},r:{description:<|"|>The red component of the RGB color code (0-255).<|"|>,type:<|"|>INT<|"|>}},type:<|"|>DICT<|"|>}}<tool|><|tool>declaration:generate_qr{description:<|"|>Generates a QR code for a given URL using the QR Code Wizard API.<|"|>,parameters:{properties:{url:{description:<|"|>The URL to be encoded in the QR code.<|"|>,type:<|"|>STR<|"|>}},type:<|"|>DICT<|"|>}}<tool|><turn|>
+<|turn>user
+Convert RGB color code 255, 0, 0 to CMYK.<turn|>
+<|turn>model
+
+
+============================================================
+[3] sample_id=w2c_train_pref_000003  label=call
+============================================================
+<bos><|turn>system
+<|tool>declaration:whole_foods_order{description:<|"|>Places an order at Whole Foods.<|"|>,parameters:{properties:{item_list:{description:<|"|>A list of items to order.<|"|>,type:<|"|>LIST<|"|>},order_size:{description:<|"|>The size of the order. Allowed values: "small", "medium", or "large".<|"|>,type:<|"|>STR<|"|>},store_location:{description:<|"|>The location of the Whole Foods store.<|"|>,type:<|"|>STR<|"|>}},type:<|"|>DICT<|"|>}}<tool|><|tool>declaration:simulate_query_database{description:<|"|>Simulates querying a database based on certain conditions.<|"|>,parameters:{properties:{conditions:{description:<|"|>Conditions for the query, each condition is a dictionary.<|"|>,type:<|"|>LIST<|"|>},table:{description:<|"|>Name of the table to query.<|"|>,type:<|"|>STR<|"|>}},type:<|"|>DICT<|"|>}}<tool|><|tool>declaration:calculate_calorie_intake{description:<|"|>Calculates the recommended daily calorie intake and macronutrient distribution based on personal characteristics and goals.<|"|>,parameters:{properties:{activity_level:{description:<|"|>Activity level on a scale of 1 to 5 (1 = sedentary, 5 = extremely active).<|"|>,type:<|"|>INT<|"|>},age:{description:<|"|>Age in years.<|"|>,type:<|"|>INT<|"|>},goal:{description:<|"|>Fitness goal, either 'lose', 'maintain', or 'gain'.<|"|>,type:<|"|>STR<|"|>},height_cm:{description:<|"|>Height in centimeters.<|"|>,type:<|"|>FLOAT<|"|>},sex:{description:<|"|>Biological sex, either 'male' or 'female'.<|"|>,type:<|"|>STR<|"|>},weight_kg:{description:<|"|>Body weight in kilograms.<|"|>,type:<|"|>FLOAT<|"|>}},type:<|"|>DICT<|"|>}}<tool|><turn|>
+<|turn>user
+Place a small order at the Whole Foods store in Chicago for milk and eggs.<turn|>
+<|turn>model
+
+
+============================================================
+[4] sample_id=w2c_train_pref_000004  label=no_call
+============================================================
+<bos><|turn>system
+<|tool>declaration:get_channels{description:<|"|>Retrieve a list of radio channels based on various filtering parameters.<|"|>,parameters:{properties:{city_id:{description:<|"|>Filter channels by city ID. Default is None.<|"|>,type:<|"|>INT, OPTIONAL<|"|>},country_id:{description:<|"|>Filter channels by country ID. Default is 50.<|"|>,type:<|"|>INT<|"|>},genre_id:{description:<|"|>Filter channels by genre ID. Default is None.<|"|>,type:<|"|>INT, OPTIONAL<|"|>},keyword:{description:<|"|>Filter channels by keyword. Default is 'a'. Set to an empty string if no filtering by keyword is needed.<|"|>,type:<|"|>STR<|"|>},page:{description:<|"|>The page number for pagination. Default is 1.<|"|>,type:<|"|>INT<|"|>}},type:<|"|>DICT<|"|>}}<tool|><turn|>
+<|turn>user
+I am interested in finding some radio channels that have 'pop' in their names. Can you help me with that?<turn|>
+<|turn>model
+
+
