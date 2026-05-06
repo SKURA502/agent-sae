@@ -1,16 +1,18 @@
 #!/bin/bash
 
 # ── 全局配置 ──────────────────────────────────────────────────────────
-_MODEL_BASE="/mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/model"
+# Set SOURCE_ROOT in your environment or in a .env file (see .env.example).
+SOURCE_ROOT="${SOURCE_ROOT:-}"
+_MODEL_BASE="${SOURCE_ROOT}/model"
 
-DATA_BASE="${DATA_BASE:-/mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/dataset}"
+DATA_BASE="${DATA_BASE:-$SOURCE_ROOT/dataset}"
 OUTPUT_BASE="${OUTPUT_BASE:-/data/Agent-Tool-Use-MI}"
 DEVICE="${DEVICE:-cuda:2}"
 DTYPE="${DTYPE:-bfloat16}"
 
 WHEN2CALL_TEST="$DATA_BASE/when2call/test"
 
-JUDGE_MODEL="${JUDGE_MODEL:-/mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/model/Qwen/Qwen3.5-27B}"
+JUDGE_MODEL="${JUDGE_MODEL:-$SOURCE_ROOT/model/Qwen/Qwen3.5-27B}"
 JUDGE_DEVICE="${JUDGE_DEVICE:-cuda:2}"
 JUDGE_MAX_NEW_TOKENS="${JUDGE_MAX_NEW_TOKENS:-1024}"
 

@@ -2,7 +2,9 @@
 set -e
 
 # ── 配置 ─────────────────────────────────────────────────────────
-MODEL_PATH="${MODEL_PATH:-/mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/model/google/gemma-3-4b-it}"
+# Set SOURCE_ROOT in your environment or in a .env file (see .env.example).
+SOURCE_ROOT="${SOURCE_ROOT:-}"
+MODEL_PATH="${MODEL_PATH:-$SOURCE_ROOT/model/google/gemma-3-4b-it}"
 DATA_BASE="${DATA_BASE:-./data/raw}"
 CKPT_BASE="${CKPT_BASE:-./checkpoint}"
 DEVICE="${DEVICE:-cuda:0}"
@@ -14,8 +16,8 @@ STAGE2_DIR="$CKPT_BASE/$MODEL_NAME/stage2"
 
 mkdir -p "$STAGE1_DIR" "$STAGE2_DIR"
 
-PRETRAIN_DIR="${PRETRAIN_DIR:-/mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/dataset/Agent_tool_intrep_pretrain}"
-WHEN2CALL_TRAIN="${WHEN2CALL_TRAIN:-/mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/dataset/when2call/train}"
+PRETRAIN_DIR="${PRETRAIN_DIR:-$SOURCE_ROOT/dataset/Agent_tool_intrep_pretrain}"
+WHEN2CALL_TRAIN="${WHEN2CALL_TRAIN:-$SOURCE_ROOT/dataset/when2call/train}"
 
 STAGE1_TARGET_TOKENS=50000000   # 50M tokens
 STAGE2_TARGET_TOKENS=5000000    # ~5M tokens（When2Call pref+sft 全量约一轮）

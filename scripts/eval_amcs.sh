@@ -2,9 +2,11 @@
 set -e
 
 # ── 配置 ─────────────────────────────────────────────────────────────
-MODEL_PATH="${MODEL_PATH:-/mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/model/Qwen/Qwen3.5-4B}"
+# Set SOURCE_ROOT in your environment or in a .env file (see .env.example).
+SOURCE_ROOT="${SOURCE_ROOT:-}"
+MODEL_PATH="${MODEL_PATH:-$SOURCE_ROOT/model/Qwen/Qwen3.5-4B}"
 SAE_PATH="${SAE_PATH:-/data/Agent-Tool-Use-MI/checkpoint/Qwen3.5-4B/stage2/Qwen3.5-4B-L25-d20480-5M-stage2.pt}"
-DATA_BASE="${DATA_BASE:-/mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/dataset}"
+DATA_BASE="${DATA_BASE:-$SOURCE_ROOT/dataset}"
 OUTPUT_BASE="${OUTPUT_BASE:-/data/Agent-Tool-Use-MI}"
 DEVICE="${DEVICE:-cuda:0}"
 DTYPE="${DTYPE:-bfloat16}"
@@ -12,7 +14,7 @@ DTYPE="${DTYPE:-bfloat16}"
 WHEN2CALL_TEST="$DATA_BASE/when2call/test"
 LAYER="${LAYER:-25}"
 
-JUDGE_MODEL="${JUDGE_MODEL:-/mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/model/Qwen/Qwen3.5-27B}"
+JUDGE_MODEL="${JUDGE_MODEL:-$SOURCE_ROOT/model/Qwen/Qwen3.5-27B}"
 JUDGE_DEVICE="${JUDGE_DEVICE:-cuda:0}"
 JUDGE_MAX_NEW_TOKENS="${JUDGE_MAX_NEW_TOKENS:-1024}"
 

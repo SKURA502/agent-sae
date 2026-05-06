@@ -14,6 +14,7 @@ assistant response 的最后一个 token 处的残差流激活。
 
 import argparse
 import json
+import os
 import re
 import traceback
 from dataclasses import dataclass
@@ -43,7 +44,7 @@ class StreamingConfig:
 # ─────────────────────── judge-based labeling ──────────────────────
 
 
-DEFAULT_JUDGE_MODEL = "/mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/model/Qwen/Qwen3.5-27B"
+DEFAULT_JUDGE_MODEL = os.path.join(os.environ.get("SOURCE_ROOT", ""), "model/Qwen/Qwen3.5-27B")
 
 
 def _clear_sampling_generation_config(model) -> None:

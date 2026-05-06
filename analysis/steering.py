@@ -19,7 +19,7 @@ CLI:
     --model /path/to/model --sae-path .../best.pt \\
     --layer 25 --feature-indices 42 17 \\
     --mode amplify --alphas 0.5 1.0 2.0 5.0 \\
-    --data-path /mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/dataset/when2call/test \\
+    --data-path $SOURCE_ROOT/dataset/when2call/test \\
     --output-dir outputs/analysis/steering
 
   # ablate 实验

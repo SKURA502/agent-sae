@@ -9,9 +9,9 @@ tool_call response？
 
 用法：
 python -m run.analyze_perclass_ppl \
---model /mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/model/Qwen/Qwen3.5-4B \
---judge-model /mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/model/Qwen/Qwen3.5-27B \
---data-path /mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/dataset/when2call/test \
+--model $SOURCE_ROOT/model/Qwen/Qwen3.5-4B \
+--judge-model $SOURCE_ROOT/model/Qwen/Qwen3.5-27B \
+--data-path $SOURCE_ROOT/dataset/when2call/test \
 --device cuda:1 \
 --judge-device cuda:1 \
 --output-dir ./outputs/Qwen3.5-4B/analysis/perclass_ppl

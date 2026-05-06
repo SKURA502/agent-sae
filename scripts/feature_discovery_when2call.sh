@@ -14,7 +14,9 @@
 set -e
 
 # ── 配置 ──────────────────────────────────────────────────────────
-MODEL_PATH="${MODEL_PATH:-/mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/model/google/gemma-4-E4B-it}"
+# Set SOURCE_ROOT in your environment or in a .env file (see .env.example).
+SOURCE_ROOT="${SOURCE_ROOT:-}"
+MODEL_PATH="${MODEL_PATH:-$SOURCE_ROOT/model/google/gemma-4-E4B-it}"
 OUTPUT_BASE="${OUTPUT_BASE:-/data/Agent-Tool-Use-MI}"
 LAYER="${LAYER:-30}"
 CONCEPT="${CONCEPT:-request_for_info}"   # tool_call | request_for_info

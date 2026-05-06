@@ -27,7 +27,9 @@ ENCODE_BATCH_SIZE="${ENCODE_BATCH_SIZE:-512}"
 # Set to "true" to skip a run if the output JSON already exists
 SKIP_EXISTING="${SKIP_EXISTING:-true}"
 
-MODEL_BASE="/mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/model"
+# Set SOURCE_ROOT in your environment or in a .env file (see .env.example).
+SOURCE_ROOT="${SOURCE_ROOT:-}"
+MODEL_BASE="${SOURCE_ROOT}/model"
 
 # ── Model registry ────────────────────────────────────────────────────────────
 # Format: "org_subdir/model_name:layer:sae_checkpoint_filename"

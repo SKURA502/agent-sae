@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -28,7 +29,7 @@ from matplotlib.patches import Ellipse, Patch
 import seaborn as sns
 
 BASE       = Path("/data/Agent-Tool-Use-MI")
-MODEL_BASE = Path("/mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/model")
+MODEL_BASE = Path(os.environ.get("SOURCE_ROOT", "")) / "model"
 
 MCQ_CHOICES = ("direct_answer", "tool_call", "request_for_info", "cannot_answer")
 LABEL = {c: i for i, c in enumerate(MCQ_CHOICES)}

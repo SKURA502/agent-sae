@@ -23,6 +23,7 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -54,7 +55,7 @@ plt.rcParams.update(_RC)
 # ── Model / family config (mirrors linear_probe_combined.sh) ──────────────────
 OUTPUT_BASE = Path("/data/Agent-Tool-Use-MI")
 CHECKPOINT_BASE = OUTPUT_BASE / "checkpoint"
-MODEL_BASE = Path("/mnt/shared-storage-gpfs2/safelens-share-gpfs2/source/model")
+MODEL_BASE = Path(os.environ.get("SOURCE_ROOT", "")) / "model"
 
 SERIES = [
     {
