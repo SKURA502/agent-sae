@@ -96,6 +96,8 @@ Pre-trained SAE checkpoints are provided for all eight models:
 | `Qwen3.5-4B` | 25 | 20480 |
 | `Qwen3.5-9B` | 25 | 32768 |
 
+You can find the checkpoints in [toolcalling-sae](https://huggingface.co/SKwra/toolcalling-sae)
+
 ---
 
 ## Installation
